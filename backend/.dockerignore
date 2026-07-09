@@ -1,0 +1,10 @@
+venv/
+__pycache__/
+*.pyc
+db.sqlite3
+media/
+staticfiles/
+# Never bake secrets into the image — compose injects them via env_file at runtime.
+# This also stops the dev .env (DATABASE_URL pointing at localhost) from shadowing
+# the container's database host.
+.env

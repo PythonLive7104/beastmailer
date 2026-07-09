@@ -1,0 +1,10 @@
+# Real secrets — never commit. Deploy by filling .env in from .env.example.
+.env
+
+backend/venv/
+backend/__pycache__/
+backend/db.sqlite3
+backend/staticfiles/
+backend/media/
+frontend/node_modules/
+frontend/dist/
