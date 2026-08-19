@@ -155,7 +155,12 @@ h1, h2, h3, h4 { margin: 0; font-weight: 650; letter-spacing: -0.01em; }
   background: linear-gradient(90deg, var(--brand), var(--brand-2));
   border-color: transparent; color: #fff;
 }
-.btn-primary:hover { filter: brightness(1.08); border-color: transparent; }
+/* Re-declare the gradient: .btn:hover is more specific than .btn-primary and
+   would otherwise replace it with the plain --surface-hover fill. */
+.btn-primary:hover {
+  background: linear-gradient(90deg, var(--brand), var(--brand-2));
+  filter: brightness(1.08); border-color: transparent;
+}
 .btn-danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, var(--border)); }
 .btn-danger:hover { background: color-mix(in srgb, var(--danger) 12%, transparent); border-color: var(--danger); }
 .btn-ghost { background: transparent; border-color: transparent; }
