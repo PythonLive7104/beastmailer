@@ -43,8 +43,27 @@ export function AuthProvider({ children }) {
     return me;
   };
 
+  const updateProfile = async (patch) => {
+    const updated = await api.auth.updateProfile(patch);
+    setUser(updated);
+    return updated;
+  };
+
+  // Mark the setup guide seen. Optimistically flip the flag so it won't reopen,
+  // then persist; ignore network errors — worst case it shows once more.
+  const completeOnboarding = async () => {
+    setUser((u) => (u ? { ...u, onboarding_completed: true } : u));
+    try { await api.auth.completeOnboarding(); } catch { /* ignore */ }
+  };
+
+  const deleteAccount = async (password) => {
+    await api.auth.deleteAccount({ password });
+    setToken(null);
+    setUser(null);
+  };
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout, refreshUser }}>
+    <AuthContext.Provider value={{ user, loading, login, register, logout, refreshUser, updateProfile, completeOnboarding, deleteAccount }}>
       {children}
     </AuthContext.Provider>
   );

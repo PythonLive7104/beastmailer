@@ -50,6 +50,9 @@ class UserProfile(models.Model):
     current_workspace = models.ForeignKey(
         Workspace, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
     )
+    # Set once the user finishes (or skips) the step-by-step setup guide, so the
+    # walkthrough auto-opens on first login only and can be replayed from Settings.
+    onboarding_completed = models.BooleanField(default=False)
 
 
 def _new_code() -> str:

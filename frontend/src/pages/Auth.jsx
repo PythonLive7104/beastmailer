@@ -24,7 +24,7 @@ export default function Auth({ mode = "login" }) {
       else await register(form.username, form.email, form.password);
       nav("/");
     } catch (err) {
-      toast(err.detail?.error || "Something went wrong", "err");
+      toast(err.detail?.error || err.detail?.detail || err.message || "Something went wrong", "err");
     } finally {
       setBusy(false);
     }

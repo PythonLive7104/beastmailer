@@ -13,18 +13,23 @@ from apps.workspaces.services import active_workspace, ensure_personal_workspace
 User = get_user_model()
 
 
-def _user_payload(user, token):
+def _user_dict(user):
     ws = active_workspace(user)
+    profile = getattr(user, "profile", None)
     return {
-        "token": token.key,
-        "user": {
-            "id": user.id,
-            "username": user.username,
-            "email": user.email,
-            "is_staff": user.is_staff,
-            "workspace": {"id": ws.id, "name": ws.name} if ws else None,
-        },
+        "id": user.id,
+        "username": user.username,
+        "email": user.email,
+        "first_name": user.first_name,
+        "last_name": user.last_name,
+        "is_staff": user.is_staff,
+        "onboarding_completed": bool(profile and profile.onboarding_completed),
+        "workspace": {"id": ws.id, "name": ws.name} if ws else None,
     }
+
+
+def _user_payload(user, token):
+    return {"token": token.key, "user": _user_dict(user)}
 
 
 @api_view(["POST"])
@@ -82,9 +87,65 @@ def logout(request):
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def me(request):
+    return Response(_user_dict(request.user))
+
+
+@api_view(["PATCH"])
+@permission_classes([IsAuthenticated])
+def update_profile(request):
+    """Update the logged-in user's own personal data: username, email, name."""
     user = request.user
-    ws = active_workspace(user)
-    return Response({
-        "id": user.id, "username": user.username, "email": user.email, "is_staff": user.is_staff,
-        "workspace": {"id": ws.id, "name": ws.name} if ws else None,
-    })
+    data = request.data
+
+    if "username" in data:
+        username = (data.get("username") or "").strip()
+        if not username:
+            return Response({"error": "Username cannot be empty."}, status=400)
+        if User.objects.filter(username__iexact=username).exclude(pk=user.pk).exists():
+            return Response({"error": "That username is already taken."}, status=400)
+        user.username = username
+
+    if "email" in data:
+        user.email = (data.get("email") or "").strip()
+    if "first_name" in data:
+        user.first_name = (data.get("first_name") or "").strip()
+    if "last_name" in data:
+        user.last_name = (data.get("last_name") or "").strip()
+
+    user.save()
+    SystemEvent.log("auth", "Profile updated", "info", workspace=active_workspace(user))
+    return Response(_user_dict(user))
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def complete_onboarding(request):
+    """Mark the setup guide as seen so it stops auto-opening on login."""
+    from apps.workspaces.models import UserProfile
+    profile, _ = UserProfile.objects.get_or_create(user=request.user)
+    profile.onboarding_completed = True
+    profile.save(update_fields=["onboarding_completed"])
+    return Response({"ok": True})
+
+
+@api_view(["DELETE"])
+@permission_classes([IsAuthenticated])
+def delete_account(request):
+    """Permanently delete the logged-in user's account. Requires their password.
+
+    Workspaces the user was the last member of are deleted too (cascading all their
+    mail data); shared workspaces that still have other members are left intact.
+    """
+    user = request.user
+    if not user.check_password(request.data.get("password", "")):
+        return Response({"error": "Password is incorrect."}, status=400)
+
+    from apps.workspaces.models import Membership, Workspace  # local: avoid import cycle
+
+    ws_ids = list(Membership.objects.filter(user=user).values_list("workspace_id", flat=True))
+    username = user.username
+    user.delete()  # cascades memberships, token, profile
+    # Remove any workspace that is now memberless (personal ones, or teams they were last in).
+    Workspace.objects.filter(id__in=ws_ids, memberships__isnull=True).delete()
+    SystemEvent.log("auth", f"Account deleted: {username}", "warning")
+    return Response({"ok": True})

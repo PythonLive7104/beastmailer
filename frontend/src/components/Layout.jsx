@@ -4,6 +4,7 @@ import { Icon } from "../icons";
 import { useTheme } from "../theme";
 import { useAuth } from "../auth";
 import WorkspaceSwitcher from "./WorkspaceSwitcher";
+import OnboardingGuide from "./OnboardingGuide";
 
 const NAV = [
   { section: "Main", items: [["/", "Dashboard", "dashboard", true]] },
@@ -32,6 +33,7 @@ const NAV = [
       ["/team", "Team", "team"],
       ["/security", "Security", "security"],
       ["/telegram", "Telegram", "telegram"],
+      ["/settings", "Settings", "settings"],
     ],
   },
 ];
@@ -50,18 +52,31 @@ const TITLES = {
   "/proxies": ["Proxies", "Rotate outgoing IPs for SMTP sending"],
   "/security": ["Security", "Access & credentials"],
   "/telegram": ["Telegram", "Telegram notifications"],
+  "/settings": ["Settings", "Your account & app preferences"],
 };
 
 export default function Layout() {
   const { theme, toggle } = useTheme();
-  const { user, logout } = useAuth();
+  const { user, logout, completeOnboarding } = useAuth();
   const nav = useNavigate();
   const { pathname } = useLocation();
   const [title, sub] = TITLES[pathname] || ["BeastMailer Auto-Reply", ""];
   const [navOpen, setNavOpen] = useState(false);
+  const [guideOpen, setGuideOpen] = useState(false);
 
   // Close the mobile drawer whenever the route changes.
   useEffect(() => { setNavOpen(false); }, [pathname]);
+
+  // Auto-open the setup guide on first login (until it's completed or skipped).
+  useEffect(() => {
+    if (user && !user.onboarding_completed) setGuideOpen(true);
+  }, [user?.id, user?.onboarding_completed]);
+
+  // Closing the guide (Finish or Skip) marks it seen so it won't reopen next login.
+  const closeGuide = () => {
+    setGuideOpen(false);
+    if (user && !user.onboarding_completed) completeOnboarding();
+  };
 
   const handleLogout = async () => { await logout(); nav("/login"); };
 
@@ -132,9 +147,11 @@ export default function Layout() {
           </div>
         </header>
         <main className="content">
-          <Outlet />
+          <Outlet context={{ openGuide: () => setGuideOpen(true) }} />
         </main>
       </div>
+
+      <OnboardingGuide open={guideOpen} onClose={closeGuide} />
     </div>
   );
 }

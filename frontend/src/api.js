@@ -54,6 +54,9 @@ export const api = {
     login: (body) => request("/auth/login/", { method: "POST", body }),
     logout: () => request("/auth/logout/", { method: "POST" }),
     me: () => request("/auth/me/"),
+    updateProfile: (body) => request("/auth/profile/", { method: "PATCH", body }),
+    completeOnboarding: () => request("/auth/onboarding/complete/", { method: "POST" }),
+    deleteAccount: (body) => request("/auth/account/", { method: "DELETE", body }),
   },
 
   dashboard: () => request("/dashboard/"),

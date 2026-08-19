@@ -4,7 +4,15 @@ from django.contrib import admin
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
-from apps.accounts.views import login, logout, me, register
+from apps.accounts.views import (
+    complete_onboarding,
+    delete_account,
+    login,
+    logout,
+    me,
+    register,
+    update_profile,
+)
 from apps.attachments.views import AttachmentViewSet
 from apps.automation.views import ConfigViewSet, run_engine_now
 from apps.core.views import dashboard
@@ -36,6 +44,9 @@ urlpatterns = [
     path("api/auth/login/", login),
     path("api/auth/logout/", logout),
     path("api/auth/me/", me),
+    path("api/auth/profile/", update_profile),
+    path("api/auth/onboarding/complete/", complete_onboarding),
+    path("api/auth/account/", delete_account),
     path("api/dashboard/", dashboard),
     # Singleton config: no pk needed — GET reads it, PATCH/PUT update it in place.
     path("api/config/", ConfigViewSet.as_view({"get": "list", "put": "update", "patch": "partial_update"})),

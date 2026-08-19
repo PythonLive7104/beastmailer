@@ -125,9 +125,13 @@ REST_FRAMEWORK = {
         "rest_framework.parsers.MultiPartParser",
         "rest_framework.parsers.FormParser",
     ],
+    # Token only. The SPA authenticates with `Authorization: Token …`; it never
+    # uses session cookies. Keeping SessionAuthentication here made DRF enforce
+    # CSRF on API calls whenever a stray Django `sessionid` cookie was present
+    # (e.g. after logging into /admin/), returning 403 "CSRF Failed" on login and
+    # register. The Django admin keeps its own session + CSRF handling separately.
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "rest_framework.authentication.TokenAuthentication",
-        "rest_framework.authentication.SessionAuthentication",
     ],
     # Everything requires a logged-in user by default; public endpoints opt out
     # with @permission_classes([AllowAny]).
@@ -141,3 +145,10 @@ CORS_ALLOW_ALL_ORIGINS = DEBUG
 CORS_ALLOWED_ORIGINS = os.getenv(
     "CORS_ALLOWED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
 ).split(",")
+
+
+'''
+UPDATING SERVER FROM LOCAL
+
+rsync -az --delete   --exclude '.git/' --exclude 'frontend/node_modules/' --exclude 'frontend/dist/'   --exclude 'backend/venv/' --exclude '**/__pycache__/' --exclude '*.pyc'   --exclude 'backend/db.sqlite3' --exclude 'backend/.env'   --exclude 'backend/media/' --exclude 'backend/staticfiles/'   ./ root@153.75.230.32:/root/client_sender/
+'''

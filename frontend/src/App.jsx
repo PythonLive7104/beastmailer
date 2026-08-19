@@ -16,6 +16,7 @@ import Proxies from "./pages/Proxies";
 import Telegram from "./pages/Telegram";
 import Security from "./pages/Security";
 import Team from "./pages/Team";
+import Settings from "./pages/Settings";
 
 function Protected({ children }) {
   const { user, loading } = useAuth();
@@ -51,6 +52,7 @@ export default function App() {
           <Route path="team" element={<Team />} />
           <Route path="security" element={<Security />} />
           <Route path="telegram" element={<Telegram />} />
+          <Route path="settings" element={<Settings />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
