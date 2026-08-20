@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { Icon } from "../icons";
 import { Loader, StatusBadge, useToast } from "../components/ui";
@@ -9,9 +9,15 @@ export default function Listeners() {
   const [filter, setFilter] = useState("");
   const toast = useToast();
 
+  // The 15s refresh and a filter click can be in flight at the same time. Without
+  // this counter the slower response wins, so switching to "Sent" could be painted
+  // over by an older unfiltered reply — the tab looked filtered but listed everything.
+  const reqId = useRef(0);
   const load = () => {
-    api.mailboxes.list().then(setMailboxes);
-    api.messages.list(filter ? { direction: filter } : undefined).then(setMessages);
+    const id = ++reqId.current;
+    const fresh = (setter) => (data) => { if (id === reqId.current) setter(data); };
+    api.mailboxes.list().then(fresh(setMailboxes));
+    api.messages.list(filter ? { direction: filter } : undefined).then(fresh(setMessages));
   };
   useEffect(() => { load(); const t = setInterval(load, 15000); return () => clearInterval(t); }, [filter]);
 

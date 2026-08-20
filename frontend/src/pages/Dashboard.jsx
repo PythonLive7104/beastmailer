@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { Icon } from "../icons";
 import { Loader, StatusBadge, useToast } from "../components/ui";
@@ -24,7 +24,15 @@ export default function Dashboard() {
   const now = useClock();
   const toast = useToast();
 
-  const load = () => api.dashboard().then(setData).catch(() => toast("Failed to load dashboard", "err"));
+  // Same ordering guard as the Listeners feed: "Run now" refreshes while the 30s
+  // tick may still be in flight, and the older reply must not repaint stale counts.
+  const reqId = useRef(0);
+  const load = () => {
+    const id = ++reqId.current;
+    return api.dashboard()
+      .then((d) => { if (id === reqId.current) setData(d); })
+      .catch(() => toast("Failed to load dashboard", "err"));
+  };
   useEffect(() => {
     load();
     const t = setInterval(load, 30000); // live refresh every 30s
