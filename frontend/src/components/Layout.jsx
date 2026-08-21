@@ -31,6 +31,7 @@ const NAV = [
     section: "System",
     items: [
       ["/team", "Team", "team"],
+      ["/billing", "Subscription", "bolt"],
       ["/security", "Security", "security"],
       ["/telegram", "Telegram", "telegram"],
       ["/settings", "Settings", "settings"],
@@ -47,6 +48,7 @@ const TITLES = {
   "/listeners": ["Listeners", "Mailbox polling status & live mail feed"],
   "/placeholders": ["Placeholders", "Reusable template variables"],
   "/team": ["Team", "Workspace members & sharing"],
+  "/billing": ["Subscription", "Your plan & payments"],
   "/links": ["Links", "Reusable tracked links with click counts"],
   "/attachments": ["Attachments", "Reusable files to attach to auto-replies"],
   "/proxies": ["Proxies", "Rotate outgoing IPs for SMTP sending"],

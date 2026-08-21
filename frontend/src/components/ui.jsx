@@ -46,7 +46,7 @@ export function Switch({ checked, onChange }) {
 
 // ---- Badge ----
 export function StatusBadge({ status }) {
-  const map = { sent: "badge-sent", received: "badge-received", scheduled: "badge-scheduled", failed: "badge-failed" };
+  const map = { sent: "badge-sent", received: "badge-received", scheduled: "badge-scheduled", failed: "badge-failed", confirmed: "badge-sent", pending: "badge-scheduled", rejected: "badge-failed" };
   return <span className={`badge ${map[status] || "badge-neutral"}`}>{status}</span>;
 }
 

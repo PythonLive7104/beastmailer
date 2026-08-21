@@ -17,6 +17,7 @@ import Telegram from "./pages/Telegram";
 import Security from "./pages/Security";
 import Team from "./pages/Team";
 import Settings from "./pages/Settings";
+import Billing from "./pages/Billing";
 
 function Protected({ children }) {
   const { user, loading } = useAuth();
@@ -50,6 +51,7 @@ export default function App() {
           <Route path="attachments" element={<Attachments />} />
           <Route path="proxies" element={<Proxies />} />
           <Route path="team" element={<Team />} />
+          <Route path="billing" element={<Billing />} />
           <Route path="security" element={<Security />} />
           <Route path="telegram" element={<Telegram />} />
           <Route path="settings" element={<Settings />} />

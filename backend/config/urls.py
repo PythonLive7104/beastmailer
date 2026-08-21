@@ -14,6 +14,7 @@ from apps.accounts.views import (
     update_profile,
 )
 from apps.attachments.views import AttachmentViewSet
+from apps.billing.views import billing
 from apps.automation.views import ConfigViewSet, run_engine_now
 from apps.core.views import dashboard
 from apps.links.views import LinkViewSet, redirect_link
@@ -48,6 +49,7 @@ urlpatterns = [
     path("api/auth/onboarding/complete/", complete_onboarding),
     path("api/auth/account/", delete_account),
     path("api/dashboard/", dashboard),
+    path("api/billing/", billing),
     # Singleton config: no pk needed — GET reads it, PATCH/PUT update it in place.
     path("api/config/", ConfigViewSet.as_view({"get": "list", "put": "update", "patch": "partial_update"})),
     # Telegram is likewise a per-workspace singleton, plus a /test/ action.

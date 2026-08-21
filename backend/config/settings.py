@@ -38,6 +38,7 @@ INSTALLED_APPS = [
     "apps.attachments",
     "apps.notifications",
     "apps.security",
+    "apps.billing",
 ]
 
 MIDDLEWARE = [

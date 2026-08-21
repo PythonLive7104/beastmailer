@@ -62,6 +62,11 @@ export const api = {
   dashboard: () => request("/dashboard/"),
   runEngine: () => request("/engine/run/", { method: "POST" }),
 
+  billing: {
+    get: () => request("/billing/"),
+    pay: (body) => request("/billing/", { method: "POST", body }),
+  },
+
   config: {
     get: () => request("/config/"),
     update: (body) => request("/config/", { method: "PATCH", body }),

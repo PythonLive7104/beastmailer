@@ -9,7 +9,9 @@ from __future__ import annotations
 import email
 import imaplib
 import re
+import secrets
 import smtplib
+import string
 from datetime import timedelta
 from email.header import decode_header, make_header
 from email.message import EmailMessage as PyEmailMessage
@@ -20,6 +22,7 @@ from django.db.models import Min, Q
 from django.utils import timezone
 
 from apps.automation.models import Config
+from apps.billing.services import workspace_can_send
 from apps.mail.models import EmailMessage, normalize_subject
 from apps.mailboxes.models import Mailbox
 from apps.notifications.telegram import notify
@@ -168,8 +171,42 @@ def _extract_body(msg: email.message.Message) -> str:
 # --------------------------------------------------------------------------- #
 # Template rendering
 # --------------------------------------------------------------------------- #
+# Random-string placeholders: {{ran_letter_10}} -> 10 random letters, resolved
+# freshly on every render so each sent email differs. The alphabet is chosen by the
+# middle word; the trailing number is the length (capped so a typo can't blow up a mail).
+_RANDOM_ALPHABETS = {
+    "letter": string.ascii_letters,
+    "lower": string.ascii_lowercase,
+    "upper": string.ascii_uppercase,
+    "digit": string.digits,
+    "number": string.digits,
+    "alnum": string.ascii_letters + string.digits,
+    "hex": "0123456789abcdef",
+}
+_RANDOM_KEY = re.compile(r"^ran_(letter|lower|upper|digit|number|alnum|hex)_(\d{1,3})$")
+_RANDOM_MAX_LEN = 256
+
+
+def _random_token(key: str):
+    """Return a random string for a ran_<kind>_<n> key, or None if it isn't one.
+
+    Uses `secrets` (CSPRNG), so tokens are unguessable — fine to use as one-time
+    codes or cache-busters, not just filler.
+    """
+    m = _RANDOM_KEY.match(key)
+    if not m:
+        return None
+    alphabet = _RANDOM_ALPHABETS[m.group(1)]
+    length = min(int(m.group(2)), _RANDOM_MAX_LEN)
+    return "".join(secrets.choice(alphabet) for _ in range(length))
+
+
 def render_template(text: str, context: dict, workspace=None) -> str:
-    """Replace {{key}} tokens using dynamic context + the workspace's Placeholders."""
+    """Replace {{key}} tokens using dynamic context + the workspace's Placeholders.
+
+    Also supports {{ran_letter_N}} / ran_digit_N / ran_alnum_N / ran_hex_N etc.,
+    each resolved to a fresh random string of length N at render time.
+    """
     values = dict(context)
     placeholders = Placeholder.objects.filter(workspace=workspace) if workspace else Placeholder.objects.none()
     for ph in placeholders:
@@ -177,6 +214,9 @@ def render_template(text: str, context: dict, workspace=None) -> str:
 
     def repl(match: re.Match) -> str:
         key = match.group(1).strip()
+        token = _random_token(key)
+        if token is not None:
+            return token
         return str(values.get(key, match.group(0)))
 
     return re.sub(r"\{\{\s*([\w.]+)\s*\}\}", repl, text or "")
@@ -389,6 +429,10 @@ def send_due_replies(workspace=None) -> int:
     for message in due:
         # Respect toggles that may have flipped after the reply was scheduled.
         if not message.mailbox.is_active or not Config.load(message.workspace).auto_reply_enabled:
+            continue
+        # Paywall (sending only): if the workspace owner's subscription has lapsed,
+        # leave the reply scheduled — it goes out once they pay, nothing is lost.
+        if not workspace_can_send(message.workspace):
             continue
         try:
             _send_message(message)

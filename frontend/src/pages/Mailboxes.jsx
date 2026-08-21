@@ -8,7 +8,7 @@ const BLANK = {
   imap_host: "", imap_port: 993, imap_use_ssl: true,
   smtp_host: "", smtp_port: 587, smtp_use_tls: true,
   password: "", is_active: true, use_proxy: false,
-  poll_interval_seconds: 30, reply_delay_minutes: 10,
+  poll_interval_seconds: 10, reply_delay_minutes: 10,
 };
 
 // Hosted mail providers where the recipient sees the provider's IP (not yours),
