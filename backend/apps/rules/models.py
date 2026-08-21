@@ -31,6 +31,9 @@ class ReplyTemplate(models.Model):
     name = models.CharField(max_length=120)
     subject = models.CharField(max_length=255, help_text="e.g. Re: {{original_subject}}")
     body = models.TextField()
+    # When on, `body` is an HTML document and is sent as multipart/alternative with a
+    # generated plain-text part, so clients that refuse HTML still get readable mail.
+    is_html = models.BooleanField(default=False, help_text="Send the body as HTML")
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

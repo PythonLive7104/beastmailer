@@ -3,7 +3,29 @@ import { api } from "../api";
 import { Icon } from "../icons";
 import { Field, Loader, Modal, Switch, useToast } from "../components/ui";
 
-const BLANK = { name: "", subject: "Re: {{original_subject}}", body: "Hi {{sender_name}},\n\n", is_active: true };
+const BLANK = {
+  name: "",
+  subject: "Re: {{original_subject}}",
+  body: "Hi {{sender_name}},\n\n",
+  is_html: false,
+  is_active: true,
+};
+
+// Enough of a signal to offer the toggle, without nagging about an odd < in prose.
+const LOOKS_LIKE_HTML = /<(html|body|div|table|p|br|a|span|img|h[1-6])\b[^>]*>/i;
+
+/** Render an HTML body in a sandboxed iframe: no scripts, no access to this page. */
+function HtmlPreview({ html, height }) {
+  return (
+    <iframe
+      className="html-preview"
+      style={{ height }}
+      sandbox=""
+      title="HTML preview"
+      srcDoc={html}
+    />
+  );
+}
 
 export default function AutoReply() {
   const [rows, setRows] = useState(null);
@@ -49,6 +71,8 @@ export default function AutoReply() {
 
   if (!rows) return <Loader />;
 
+  const htmlHint = editing && !editing.is_html && LOOKS_LIKE_HTML.test(editing.body || "");
+
   return (
     <div className="grid">
       <div className="section-head">
@@ -60,12 +84,19 @@ export default function AutoReply() {
         {rows.map((t) => (
           <div className="card card-pad" key={t.id}>
             <div className="between">
-              <h3>{t.name}</h3>
-              <span className={`badge ${t.is_active ? "badge-sent" : "badge-neutral"}`}>{t.is_active ? "active" : "off"}</span>
+              <h3 className="tpl-name">{t.name}</h3>
+              <div className="row" style={{ gap: 6, flexShrink: 0 }}>
+                {t.is_html && <span className="badge badge-neutral">HTML</span>}
+                <span className={`badge ${t.is_active ? "badge-sent" : "badge-neutral"}`}>{t.is_active ? "active" : "off"}</span>
+              </div>
             </div>
-            <div className="muted" style={{ margin: "8px 0" }}>{t.subject}</div>
-            <div style={{ whiteSpace: "pre-wrap", color: "var(--text-muted)", fontSize: 13, maxHeight: 92, overflow: "hidden" }}>{t.body}</div>
-            <div className="row" style={{ marginTop: 14, justifyContent: "flex-end" }}>
+            <div className="muted tpl-subject">{t.subject}</div>
+            {/* Bodies can be a single 10k-character line of pasted markup, so the
+                preview is always clipped — never allowed to size the card. */}
+            {t.is_html
+              ? <HtmlPreview html={t.body} height={140} />
+              : <div className="tpl-body">{t.body}</div>}
+            <div className="row tpl-actions">
               <button className="btn btn-sm" onClick={() => doPreview(t)}>Preview</button>
               <button className="btn btn-sm btn-ghost" onClick={() => setEditing({ ...t })}><Icon.edit /></button>
               <button className="btn btn-sm btn-danger" onClick={() => remove(t)}><Icon.trash /></button>
@@ -77,6 +108,7 @@ export default function AutoReply() {
 
       {editing && (
         <Modal
+          wide
           title={editing.id ? "Edit template" : "New template"}
           onClose={() => setEditing(null)}
           footer={<>
@@ -86,10 +118,38 @@ export default function AutoReply() {
         >
           <Field label="Template name"><input className="input" value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} /></Field>
           <Field label="Subject"><input className="input" value={editing.subject} onChange={(e) => setEditing({ ...editing, subject: e.target.value })} /></Field>
-          <Field label="Body">
-            <textarea className="textarea" style={{ minHeight: 150 }} value={editing.body} onChange={(e) => setEditing({ ...editing, body: e.target.value })} />
-          </Field>
-          <div>
+
+          <div className="row between" style={{ marginBottom: 6 }}>
+            <span className="page-sub">Body</span>
+            <label className="row" style={{ gap: 8, cursor: "pointer" }}>
+              <Switch checked={editing.is_html} onChange={(v) => setEditing({ ...editing, is_html: v })} />
+              <span className="page-sub">HTML</span>
+            </label>
+          </div>
+          <textarea
+            className={`textarea ${editing.is_html ? "mono" : ""}`}
+            style={{ minHeight: editing.is_html ? 280 : 180, width: "100%" }}
+            spellCheck={!editing.is_html}
+            value={editing.body}
+            onChange={(e) => setEditing({ ...editing, body: e.target.value })}
+          />
+          {htmlHint && (
+            <div className="hint-inline">
+              That looks like HTML. Turn on the HTML switch or it will be sent as literal text.
+            </div>
+          )}
+          {editing.is_html && (
+            <>
+              <div className="page-sub" style={{ margin: "14px 0 6px" }}>Live preview</div>
+              <HtmlPreview html={editing.body} height={260} />
+              <div className="hint-inline">
+                Sent as multipart/alternative — a plain-text version is generated automatically
+                for clients that refuse HTML. Placeholders work inside markup.
+              </div>
+            </>
+          )}
+
+          <div style={{ marginTop: 16 }}>
             <div className="page-sub" style={{ marginBottom: 6 }}>Insert placeholder:</div>
             <div className="row" style={{ flexWrap: "wrap", gap: 6 }}>
               {placeholders.map((p) => <span className="chip" key={p.id} onClick={() => insert(p.key)}>{`{{${p.key}}}`}</span>)}
@@ -111,12 +171,14 @@ export default function AutoReply() {
       )}
 
       {preview && (
-        <Modal title={`Preview · ${preview.name}`} onClose={() => setPreview(null)}
+        <Modal wide title={`Preview · ${preview.name}`} onClose={() => setPreview(null)}
           footer={<button className="btn btn-primary" onClick={() => setPreview(null)}>Close</button>}>
           <div className="muted" style={{ marginBottom: 4 }}>Subject</div>
-          <div className="card card-pad" style={{ marginBottom: 14 }}>{preview.subject}</div>
+          <div className="card card-pad tpl-body" style={{ marginBottom: 14, maxHeight: "none" }}>{preview.subject}</div>
           <div className="muted" style={{ marginBottom: 4 }}>Body</div>
-          <div className="card card-pad" style={{ whiteSpace: "pre-wrap" }}>{preview.body}</div>
+          {preview.is_html
+            ? <HtmlPreview html={preview.body} height="min(52vh, 460px)" />
+            : <div className="card card-pad tpl-body" style={{ maxHeight: "52vh", overflow: "auto" }}>{preview.body}</div>}
         </Modal>
       )}
     </div>

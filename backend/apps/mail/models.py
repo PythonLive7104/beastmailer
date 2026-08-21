@@ -47,6 +47,9 @@ class EmailMessage(models.Model):
     from_addr = models.CharField(max_length=320, blank=True, default="")
     to_addr = models.CharField(max_length=998, blank=True, default="")
     body = models.TextField(blank=True, default="")
+    # Copied from the template at scheduling time: the template may be edited or
+    # deleted before the delay elapses, so the reply carries its own format.
+    is_html = models.BooleanField(default=False)
 
     # Set for auto-replies: which rule fired and the reply it is/was answering.
     matched_rule = models.ForeignKey(

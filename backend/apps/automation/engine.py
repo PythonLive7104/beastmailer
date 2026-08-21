@@ -14,6 +14,7 @@ from datetime import timedelta
 from email.header import decode_header, make_header
 from email.message import EmailMessage as PyEmailMessage
 from email.utils import parseaddr
+from html import unescape
 
 from django.db.models import Q
 from django.utils import timezone
@@ -121,6 +122,24 @@ def _is_auto_message(msg: email.message.Message, from_addr: str) -> bool:
     if local in {"mailer-daemon", "postmaster", "no-reply", "noreply", "do-not-reply", "donotreply"}:
         return True
     return False
+
+
+def html_to_text(html: str) -> str:
+    """Flatten an HTML body into a readable plain-text alternative.
+
+    Every HTML reply ships a text/plain part alongside it (RFC 2046 multipart/
+    alternative), both because some clients refuse HTML and because a missing text
+    part is a well-known spam signal. This is deliberately dependency-free: it keeps
+    block structure as line breaks and drops everything else.
+    """
+    text = re.sub(r"(?is)<(script|style)\b.*?</\1>", "", html or "")
+    text = re.sub(r"(?i)<br\s*/?>", "\n", text)
+    text = re.sub(r"(?i)</(p|div|tr|h[1-6]|li|table)>", "\n", text)
+    text = re.sub(r"<[^>]+>", "", text)
+    text = unescape(text)
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"\n\s*\n\s*\n+", "\n\n", text)
+    return text.strip()
 
 
 def _extract_body(msg: email.message.Message) -> str:
@@ -277,7 +296,12 @@ def _maybe_schedule_reply(mailbox: Mailbox, incoming: EmailMessage, config: Conf
         subject = render_template(template.subject, context, workspace=mailbox.workspace)
         body = render_template(template.body, context, workspace=mailbox.workspace)
         if config.signature:
-            body = f"{body}\n\n{config.signature}"
+            # Two newlines read as a blank line in text, but collapse to nothing in
+            # HTML — there the separator has to be markup.
+            if template.is_html:
+                body = f"{body}<br><br>{config.signature.replace(chr(10), '<br>')}"
+            else:
+                body = f"{body}\n\n{config.signature}"
 
         reply = EmailMessage.objects.create(
             workspace=mailbox.workspace,
@@ -289,6 +313,7 @@ def _maybe_schedule_reply(mailbox: Mailbox, incoming: EmailMessage, config: Conf
             from_addr=mailbox.email_address,
             to_addr=incoming.from_addr,
             body=body,
+            is_html=template.is_html,
             matched_rule=rule,
             reply_to_message=incoming,
             scheduled_for=timezone.now() + timedelta(minutes=config.reply_delay_minutes),
@@ -351,7 +376,13 @@ def _send_message(message: EmailMessage):
     if message.reply_to_message and message.reply_to_message.message_id:
         py["In-Reply-To"] = message.reply_to_message.message_id
         py["References"] = message.reply_to_message.message_id
-    py.set_content(message.body)
+    if message.is_html:
+        # set_content first makes text/plain the fallback part; add_alternative then
+        # appends the HTML, and clients pick the last part they can render.
+        py.set_content(html_to_text(message.body))
+        py.add_alternative(message.body, subtype="html")
+    else:
+        py.set_content(message.body)
 
     for att in message.attachments.all():
         try:

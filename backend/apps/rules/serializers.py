@@ -12,7 +12,7 @@ class PlaceholderSerializer(serializers.ModelSerializer):
 class ReplyTemplateSerializer(serializers.ModelSerializer):
     class Meta:
         model = ReplyTemplate
-        fields = ["id", "name", "subject", "body", "is_active", "created_at", "updated_at"]
+        fields = ["id", "name", "subject", "body", "is_html", "is_active", "created_at", "updated_at"]
         read_only_fields = ["created_at", "updated_at"]
 
 

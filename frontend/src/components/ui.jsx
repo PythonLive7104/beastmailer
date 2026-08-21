@@ -19,10 +19,10 @@ export function ToastProvider({ children }) {
 }
 
 // ---- Modal ----
-export function Modal({ title, onClose, children, footer }) {
+export function Modal({ title, onClose, children, footer, wide }) {
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+      <div className={`modal${wide ? " modal-wide" : ""}`} onClick={(e) => e.stopPropagation()}>
         <div className="modal-head between">
           <h3>{title}</h3>
           <button className="btn btn-ghost btn-sm" onClick={onClose}>✕</button>

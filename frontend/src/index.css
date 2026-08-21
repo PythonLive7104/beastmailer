@@ -175,6 +175,7 @@ h1, h2, h3, h4 { margin: 0; font-weight: 650; letter-spacing: -0.01em; }
 }
 .card-pad { padding: 20px; }
 .grid { display: grid; gap: 18px; }
+.grid > * { min-width: 0; }
 
 .stat-card { padding: 18px 20px; position: relative; overflow: hidden; }
 .stat-label { color: var(--text-muted); font-size: 12.5px; margin-bottom: 8px; }
@@ -285,8 +286,10 @@ h1, h2, h3, h4 { margin: 0; font-weight: 650; letter-spacing: -0.01em; }
 .modal {
   background: var(--surface); border: 1px solid var(--border-strong);
   border-radius: 18px; width: 100%; max-width: 560px; max-height: 88vh; overflow: auto;
+  overflow-wrap: anywhere;
   box-shadow: var(--shadow);
 }
+.modal-wide { max-width: 880px; }
 .modal-head { padding: 20px 22px; border-bottom: 1px solid var(--border); }
 .modal-body { padding: 20px 22px; }
 .modal-foot { padding: 16px 22px; border-top: 1px solid var(--border); display: flex; gap: 10px; justify-content: flex-end; }
@@ -433,3 +436,25 @@ h1, h2, h3, h4 { margin: 0; font-weight: 650; letter-spacing: -0.01em; }
   .auth-form-side { padding: 28px 18px; }
   .auth-headline { font-size: 32px; }
 }
+
+/* ---------------- Reply templates ---------------- */
+/* Bodies are user-pasted markup: never let one size the card or the page. */
+.tpl-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tpl-subject { margin: 8px 0; overflow-wrap: anywhere; }
+.tpl-body {
+  white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word;
+  color: var(--text-muted); font-size: 13px; max-height: 120px; overflow: hidden;
+}
+.tpl-actions { margin-top: 14px; justify-content: flex-end; flex-wrap: wrap; }
+
+/* Email HTML is authored against a white canvas, so the frame keeps one in dark mode. */
+.html-preview {
+  display: block; width: 100%; border: 1px solid var(--border);
+  border-radius: 10px; background: #fff;
+}
+.textarea.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.5px; line-height: 1.55;
+  white-space: pre; overflow-wrap: normal; overflow-x: auto;
+}
+.hint-inline { margin-top: 8px; font-size: 12.5px; color: var(--text-muted); }

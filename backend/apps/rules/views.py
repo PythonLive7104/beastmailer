@@ -32,6 +32,7 @@ class ReplyTemplateViewSet(WorkspaceScopedMixin, viewsets.ModelViewSet):
         return Response({
             "subject": render_template(template.subject, context, workspace=template.workspace),
             "body": render_template(template.body, context, workspace=template.workspace),
+            "is_html": template.is_html,
         })
 
 

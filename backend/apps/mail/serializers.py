@@ -12,7 +12,7 @@ class EmailMessageSerializer(serializers.ModelSerializer):
         model = EmailMessage
         fields = [
             "id", "mailbox", "mailbox_name", "direction", "status", "event",
-            "subject", "thread_key", "from_addr", "to_addr", "body",
+            "subject", "thread_key", "from_addr", "to_addr", "body", "is_html",
             "matched_rule", "reply_to_message",
             "scheduled_for", "received_at", "sent_at", "timestamp", "error", "created_at",
         ]
