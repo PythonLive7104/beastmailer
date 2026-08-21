@@ -45,6 +45,8 @@ class EmailMessage(models.Model):
     subject = models.CharField(max_length=998, blank=True, default="")
     thread_key = models.CharField(max_length=998, blank=True, default="", db_index=True)
     from_addr = models.CharField(max_length=320, blank=True, default="")
+    # The display name from the incoming "From:" header (e.g. "Jane Doe"), when present.
+    from_name = models.CharField(max_length=255, blank=True, default="")
     to_addr = models.CharField(max_length=998, blank=True, default="")
     body = models.TextField(blank=True, default="")
     # Copied from the template at scheduling time: the template may be edited or

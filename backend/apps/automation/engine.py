@@ -317,7 +317,8 @@ def _ingest_incoming(mailbox: Mailbox, uid: int, msg, config: Config) -> int:
         return 0
 
     subject = _decode(msg.get("Subject", ""))
-    from_addr = parseaddr(_decode(msg.get("From", "")))[1]
+    from_name, from_addr = parseaddr(_decode(msg.get("From", "")))
+    from_name = from_name.strip()
     body = _extract_body(msg)
     thread_key = normalize_subject(subject)
 
@@ -341,6 +342,7 @@ def _ingest_incoming(mailbox: Mailbox, uid: int, msg, config: Config) -> int:
         subject=subject,
         thread_key=thread_key,
         from_addr=from_addr,
+        from_name=from_name,
         to_addr=mailbox.email_address,
         body=body[:20000],
         reply_to_message=original,
@@ -351,6 +353,17 @@ def _ingest_incoming(mailbox: Mailbox, uid: int, msg, config: Config) -> int:
     if config.auto_reply_enabled and not _is_auto_message(msg, from_addr):
         _maybe_schedule_reply(mailbox, incoming, config)
     return 1
+
+
+def _sender_name(incoming: EmailMessage) -> str:
+    """A human name for {{sender_name}}: the From display name if it's a real name,
+    otherwise the email's local part cleaned up (jane.doe -> Jane Doe)."""
+    name = (incoming.from_name or "").strip().strip('"').strip()
+    # Some senders put their own address in the display-name slot; that's not a name.
+    if name and "@" not in name:
+        return name
+    local = (incoming.from_addr or "").split("@")[0]
+    return re.sub(r"[._-]+", " ", local).strip().title() or "there"
 
 
 def _maybe_schedule_reply(mailbox: Mailbox, incoming: EmailMessage, config: Config):
@@ -369,7 +382,7 @@ def _maybe_schedule_reply(mailbox: Mailbox, incoming: EmailMessage, config: Conf
         if not template.is_active:
             continue
         context = {
-            "sender_name": incoming.from_addr.split("@")[0].replace(".", " ").title(),
+            "sender_name": _sender_name(incoming),
             "sender_email": incoming.from_addr,
             "original_subject": incoming.subject,
             "mailbox_name": mailbox.name,

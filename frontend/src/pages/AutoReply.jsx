@@ -3,6 +3,20 @@ import { api } from "../api";
 import { Icon } from "../icons";
 import { Field, Loader, Modal, Switch, useToast } from "../components/ui";
 
+const DYNAMIC_KEYS = [
+  ["sender_name", "recipient's name"],
+  ["sender_email", "recipient's email"],
+  ["original_subject", "subject they sent"],
+  ["mailbox_name", "this mailbox's name"],
+  ["date", "today's date"],
+];
+const RANDOM_KEYS = [
+  ["ran_letter_10", "10 random letters"],
+  ["ran_digit_6", "6 random digits"],
+  ["ran_alnum_12", "12 letters + digits"],
+  ["ran_hex_8", "8 hex chars"],
+];
+
 const BLANK = {
   name: "",
   subject: "Re: {{original_subject}}",
@@ -150,10 +164,20 @@ export default function AutoReply() {
           )}
 
           <div style={{ marginTop: 16 }}>
-            <div className="page-sub" style={{ marginBottom: 6 }}>Insert placeholder:</div>
+            <div className="page-sub" style={{ marginBottom: 6 }}>Dynamic — filled in per message:</div>
             <div className="row" style={{ flexWrap: "wrap", gap: 6 }}>
-              {placeholders.map((p) => <span className="chip" key={p.id} onClick={() => insert(p.key)}>{`{{${p.key}}}`}</span>)}
+              {DYNAMIC_KEYS.map(([k, hint]) => <span className="chip" key={k} title={hint} onClick={() => insert(k)}>{`{{${k}}}`}</span>)}
             </div>
+            <div className="page-sub" style={{ margin: "10px 0 6px" }}>Random — fresh each send (change the number for length):</div>
+            <div className="row" style={{ flexWrap: "wrap", gap: 6 }}>
+              {RANDOM_KEYS.map(([k, hint]) => <span className="chip" key={k} title={hint} onClick={() => insert(k)}>{`{{${k}}}`}</span>)}
+            </div>
+            {placeholders.length > 0 && <>
+              <div className="page-sub" style={{ margin: "10px 0 6px" }}>Your placeholders:</div>
+              <div className="row" style={{ flexWrap: "wrap", gap: 6 }}>
+                {placeholders.map((p) => <span className="chip" key={p.id} onClick={() => insert(p.key)}>{`{{${p.key}}}`}</span>)}
+              </div>
+            </>}
           </div>
           {links.length > 0 && (
             <div style={{ marginTop: 12 }}>
