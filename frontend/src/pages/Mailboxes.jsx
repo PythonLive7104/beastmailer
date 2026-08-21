@@ -8,6 +8,7 @@ const BLANK = {
   imap_host: "", imap_port: 993, imap_use_ssl: true,
   smtp_host: "", smtp_port: 587, smtp_use_tls: true,
   password: "", is_active: true, use_proxy: false,
+  poll_interval_seconds: 30, reply_delay_minutes: 10,
 };
 
 // Hosted mail providers where the recipient sees the provider's IP (not yours),
@@ -23,12 +24,13 @@ const isHostedProvider = (host) => {
 
 export default function Mailboxes() {
   const [rows, setRows] = useState(null);
+  const [config, setConfig] = useState(null); // workspace defaults, for inherited timing
   const [editing, setEditing] = useState(null); // object or null
   const [busy, setBusy] = useState(false);
   const toast = useToast();
 
   const load = () => api.mailboxes.list().then(setRows);
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); api.config.get().then(setConfig); }, []);
 
   const save = async () => {
     setBusy(true);
@@ -83,7 +85,7 @@ export default function Mailboxes() {
       <div className="card">
         <table className="table">
           <thead>
-            <tr><th>Name</th><th>Address</th><th>IMAP / SMTP</th><th>Status</th><th>Last polled</th><th></th></tr>
+            <tr><th>Name</th><th>Address</th><th>IMAP / SMTP</th><th>Status</th><th>Poll · Delay</th><th>Last polled</th><th></th></tr>
           </thead>
           <tbody>
             {rows.map((m) => (
@@ -96,6 +98,17 @@ export default function Mailboxes() {
                   {m.use_proxy && <span className="badge badge-received" style={{ marginLeft: 6 }} title="Outgoing SMTP routed through the proxy pool"><Icon.proxy /> proxy</span>}
                   {m.last_error && <span className="badge badge-failed" style={{ marginLeft: 6 }}>error</span>}
                 </td>
+                <td className="muted mono" title={
+                  m.poll_interval_seconds == null || m.reply_delay_minutes == null
+                    ? "* inherited from the workspace defaults on the Configuration page"
+                    : "Set on this account"
+                }>
+                  {config
+                    ? `${m.poll_interval_seconds ?? config.poll_interval_seconds}s · ` +
+                      `${m.reply_delay_minutes ?? config.reply_delay_minutes}m` +
+                      (m.poll_interval_seconds == null || m.reply_delay_minutes == null ? " *" : "")
+                    : "—"}
+                </td>
                 <td className="mono">{m.last_polled_at ? new Date(m.last_polled_at).toLocaleString() : "never"}</td>
                 <td>
                   <div className="row" style={{ justifyContent: "flex-end", gap: 6 }}>
@@ -107,7 +120,7 @@ export default function Mailboxes() {
                 </td>
               </tr>
             ))}
-            {rows.length === 0 && <tr><td colSpan={6}><div className="empty">No mailboxes yet. Add one to start syncing mail.</div></td></tr>}
+            {rows.length === 0 && <tr><td colSpan={7}><div className="empty">No mailboxes yet. Add one to start syncing mail.</div></td></tr>}
           </tbody>
         </table>
       </div>
@@ -130,6 +143,10 @@ export default function Mailboxes() {
 
 function MailboxForm({ value, onChange }) {
   const set = (k) => (e) => onChange({ ...value, [k]: e?.target ? e.target.value : e });
+  const setNum = (k) => (e) => {
+    const raw = e.target.value;
+    onChange({ ...value, [k]: raw === "" ? null : Number(raw) });
+  };
   return (
     <div>
       <Field label="Display name"><input className="input" value={value.name} onChange={set("name")} placeholder="Sales inbox" /></Field>
@@ -164,6 +181,22 @@ function MailboxForm({ value, onChange }) {
           </span>
         </div>
       )}
+
+      <h4 style={{ margin: "10px 0 12px", color: "var(--text-muted)" }}>Timing for this account</h4>
+      <div className="field-row">
+        <Field label="Poll every (seconds)">
+          <input className="input" type="number" min="10" placeholder="workspace default"
+            value={value.poll_interval_seconds ?? ""} onChange={setNum("poll_interval_seconds")} />
+        </Field>
+        <Field label="Reply delay (minutes)">
+          <input className="input" type="number" min="0" placeholder="workspace default"
+            value={value.reply_delay_minutes ?? ""} onChange={setNum("reply_delay_minutes")} />
+        </Field>
+      </div>
+      <div className="hint-inline" style={{ marginBottom: 14 }}>
+        Leave either blank to follow the workspace defaults on the Configuration page.
+        Polling faster than 30s on Gmail or Outlook risks rate-limiting.
+      </div>
 
       <div className="row"><Switch checked={value.is_active} onChange={(v) => onChange({ ...value, is_active: v })} /><span className="page-sub">Active — include in polling</span></div>
     </div>

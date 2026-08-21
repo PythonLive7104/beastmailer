@@ -16,7 +16,7 @@ from email.message import EmailMessage as PyEmailMessage
 from email.utils import parseaddr
 from html import unescape
 
-from django.db.models import Q
+from django.db.models import Min, Q
 from django.utils import timezone
 
 from apps.automation.models import Config
@@ -183,6 +183,48 @@ def render_template(text: str, context: dict, workspace=None) -> str:
 
 
 # --------------------------------------------------------------------------- #
+# Per-account timing
+# --------------------------------------------------------------------------- #
+# Each mailbox may set its own cadence; a blank override falls back to the
+# workspace Config, so accounts added before these fields existed are unaffected.
+
+# A tick rarely lands exactly on the interval, so without a little slack a mailbox
+# on a 30s interval polled by a 30s loop would drift to every other tick.
+POLL_TOLERANCE_SECONDS = 1
+
+
+def effective_poll_interval(mailbox: Mailbox, config: Config | None = None) -> int:
+    if mailbox.poll_interval_seconds:
+        return mailbox.poll_interval_seconds
+    return (config or Config.load(mailbox.workspace)).poll_interval_seconds
+
+
+def effective_reply_delay(mailbox: Mailbox, config: Config) -> int:
+    # `is not None` rather than truthiness: 0 minutes is a valid "reply at once".
+    if mailbox.reply_delay_minutes is not None:
+        return mailbox.reply_delay_minutes
+    return config.reply_delay_minutes
+
+
+def is_due_for_poll(mailbox: Mailbox, config: Config, now=None) -> bool:
+    if not mailbox.last_polled_at:
+        return True
+    elapsed = ((now or timezone.now()) - mailbox.last_polled_at).total_seconds()
+    return elapsed >= effective_poll_interval(mailbox, config) - POLL_TOLERANCE_SECONDS
+
+
+def next_tick_seconds() -> int:
+    """How long the engine loop should sleep: the shortest cadence in use."""
+    intervals = [
+        effective_poll_interval(m)
+        for m in Mailbox.objects.filter(is_active=True).select_related("workspace")
+    ]
+    if not intervals:
+        intervals = [Config.objects.aggregate(m=Min("poll_interval_seconds"))["m"] or 30]
+    return max(5, min(intervals))
+
+
+# --------------------------------------------------------------------------- #
 # Polling
 # --------------------------------------------------------------------------- #
 def poll_mailbox(mailbox: Mailbox) -> int:
@@ -316,7 +358,7 @@ def _maybe_schedule_reply(mailbox: Mailbox, incoming: EmailMessage, config: Conf
             is_html=template.is_html,
             matched_rule=rule,
             reply_to_message=incoming,
-            scheduled_for=timezone.now() + timedelta(minutes=config.reply_delay_minutes),
+            scheduled_for=timezone.now() + timedelta(minutes=effective_reply_delay(mailbox, config)),
         )
         attachments = list(rule.attachments.all())
         if attachments:
@@ -402,18 +444,25 @@ def _send_message(message: EmailMessage):
         smtp.quit()
 
 
-def run_once(workspace=None) -> dict:
-    """One full engine tick: poll active mailboxes, then send due replies.
+def run_once(workspace=None, force=False) -> dict:
+    """One full engine tick: poll due mailboxes, then send due replies.
 
     Pass ``workspace`` to restrict the tick to a single workspace (the on-demand run
     from the dashboard); the looping ``run_engine`` command leaves it ``None`` to
-    process every workspace.
+    process every workspace. ``force`` polls every mailbox regardless of its own
+    interval — what a human pressing "Run now" expects.
     """
-    stats = {"polled": 0, "ingested": 0, "sent": 0, "errors": []}
-    mailboxes = Mailbox.objects.filter(is_active=True)
+    stats = {"polled": 0, "skipped": 0, "ingested": 0, "sent": 0, "errors": []}
+    now = timezone.now()
+    mailboxes = Mailbox.objects.filter(is_active=True).select_related("workspace")
     if workspace is not None:
         mailboxes = mailboxes.filter(workspace=workspace)
     for mailbox in mailboxes:
+        # The loop ticks at the shortest interval in use, so a mailbox on a slower
+        # cadence simply isn't due on most ticks.
+        if not force and not is_due_for_poll(mailbox, Config.load(mailbox.workspace), now):
+            stats["skipped"] += 1
+            continue
         try:
             stats["ingested"] += poll_mailbox(mailbox)
             stats["polled"] += 1

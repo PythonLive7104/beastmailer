@@ -7,10 +7,8 @@ Usage:
 import time
 
 from django.core.management.base import BaseCommand
-from django.db.models import Min
 
-from apps.automation.engine import run_once
-from apps.automation.models import Config
+from apps.automation.engine import next_tick_seconds, run_once
 
 
 class Command(BaseCommand):
@@ -25,14 +23,15 @@ class Command(BaseCommand):
             stats = run_once()
             self.stdout.write(
                 self.style.SUCCESS(
-                    f"tick: polled={stats['polled']} ingested={stats['ingested']} "
-                    f"sent={stats['sent']} errors={len(stats['errors'])}"
+                    f"tick: polled={stats['polled']} skipped={stats['skipped']} "
+                    f"ingested={stats['ingested']} sent={stats['sent']} "
+                    f"errors={len(stats['errors'])}"
                 )
             )
             for err in stats["errors"]:
                 self.stderr.write(self.style.WARNING(f"  {err}"))
             if not run_forever:
                 break
-            # Tick at the shortest poll interval configured across all workspaces.
-            interval = Config.objects.aggregate(m=Min("poll_interval_seconds"))["m"] or 30
-            time.sleep(max(5, interval))
+            # Tick at the shortest cadence any active mailbox asks for; mailboxes on
+            # slower intervals are skipped until they come due.
+            time.sleep(next_tick_seconds())

@@ -15,7 +15,8 @@ class MailboxSerializer(serializers.ModelSerializer):
             "imap_host", "imap_port", "imap_use_ssl",
             "smtp_host", "smtp_port", "smtp_use_tls",
             "username", "password", "has_password",
-            "is_active", "use_proxy", "last_polled_at", "last_seen_uid", "last_error",
+            "is_active", "use_proxy", "poll_interval_seconds", "reply_delay_minutes",
+            "last_polled_at", "last_seen_uid", "last_error",
             "created_at", "updated_at",
         ]
         read_only_fields = ["last_polled_at", "last_seen_uid", "last_error", "created_at", "updated_at"]

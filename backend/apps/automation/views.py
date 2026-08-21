@@ -31,4 +31,4 @@ class ConfigViewSet(viewsets.ViewSet):
 @api_view(["POST"])
 def run_engine_now(request):
     """Kick a single engine tick on demand, scoped to the caller's workspace."""
-    return Response(run_once(workspace=active_workspace(request.user)))
+    return Response(run_once(workspace=active_workspace(request.user), force=True))

@@ -1,3 +1,4 @@
+from django.core.validators import MinValueValidator
 from django.db import models
 
 from .crypto import decrypt, encrypt
@@ -28,6 +29,17 @@ class Mailbox(models.Model):
     # When on, outgoing SMTP for this mailbox is routed through a random proxy
     # from the workspace pool (see apps.proxies). Off = direct connection.
     use_proxy = models.BooleanField(default=False)
+    # Per-account timing. Blank falls back to the workspace Config, so existing
+    # mailboxes keep behaving exactly as before until someone sets an override.
+    poll_interval_seconds = models.PositiveIntegerField(
+        null=True, blank=True, validators=[MinValueValidator(10)],
+        help_text="How often to check this account. Blank = workspace default.",
+    )
+    reply_delay_minutes = models.PositiveIntegerField(
+        null=True, blank=True,
+        help_text="Wait this long before auto-replying from this account. Blank = workspace default.",
+    )
+
     last_polled_at = models.DateTimeField(null=True, blank=True)
     last_seen_uid = models.PositiveBigIntegerField(default=0)
     last_error = models.TextField(blank=True, default="")
