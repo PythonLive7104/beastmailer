@@ -58,7 +58,10 @@ export default function Listeners() {
                 <tr key={m.id}>
                   <td className="mono">{new Date(m.timestamp).toLocaleString()}</td>
                   <td><span className={`badge ${m.direction === "incoming" ? "badge-received" : "badge-neutral"}`}>{m.direction === "incoming" ? "in" : "out"}</span></td>
-                  <td><StatusBadge status={m.status} /></td>
+                  <td>
+                    <StatusBadge status={m.status} />
+                    {m.attempt_count > 1 && <span className="muted" style={{ marginLeft: 6, fontSize: 12 }}>· try {m.attempt_count}</span>}
+                  </td>
                   <td className="subj">{m.subject}</td>
                   <td className="muted">{m.direction === "incoming" ? m.from_addr : m.to_addr}</td>
                 </tr>

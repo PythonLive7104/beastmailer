@@ -11,6 +11,56 @@ const BLANK = {
   poll_interval_seconds: 10, reply_delay_minutes: 10,
 };
 
+// Connection presets keyed by provider. `match` autodetects from the email domain;
+// `note` warns about the provider's auth quirk (app passwords, OAuth) at setup time.
+const PRESETS = [
+  {
+    id: "gmail", label: "Gmail / Google Workspace",
+    match: ["gmail.com", "googlemail.com"],
+    imap_host: "imap.gmail.com", imap_port: 993, imap_use_ssl: true,
+    smtp_host: "smtp.gmail.com", smtp_port: 587, smtp_use_tls: true,
+    note: "Requires an App Password (Google account → Security → App passwords). Your normal password will be rejected.",
+  },
+  {
+    id: "yahoo", label: "Yahoo Mail",
+    match: ["yahoo.com", "yahoo.co", "ymail.com", "rocketmail.com"],
+    imap_host: "imap.mail.yahoo.com", imap_port: 993, imap_use_ssl: true,
+    smtp_host: "smtp.mail.yahoo.com", smtp_port: 465, smtp_use_tls: false,
+    note: "App Password mandatory (Yahoo → Account Security → Generate app password). Yahoo throttles quickly — keep volume modest.",
+  },
+  {
+    id: "outlook", label: "Outlook / Hotmail / Microsoft 365",
+    match: ["outlook.com", "hotmail.com", "live.com", "msn.com", "office365.com"],
+    imap_host: "outlook.office365.com", imap_port: 993, imap_use_ssl: true,
+    smtp_host: "smtp.office365.com", smtp_port: 587, smtp_use_tls: true,
+    note: "⚠ Microsoft is disabling password (basic) IMAP/SMTP auth in favour of OAuth. Password login may fail on newer accounts — this app cannot do OAuth yet.",
+  },
+  {
+    id: "zoho", label: "Zoho Mail",
+    match: ["zoho.com", "zohomail.com"],
+    imap_host: "imap.zoho.com", imap_port: 993, imap_use_ssl: true,
+    smtp_host: "smtp.zoho.com", smtp_port: 465, smtp_use_tls: false,
+    note: "Use an app-specific password if 2FA is on. Free plans may need IMAP enabled in Zoho settings first.",
+  },
+  {
+    id: "icloud", label: "iCloud Mail",
+    match: ["icloud.com", "me.com", "mac.com"],
+    imap_host: "imap.mail.me.com", imap_port: 993, imap_use_ssl: true,
+    smtp_host: "smtp.mail.me.com", smtp_port: 587, smtp_use_tls: true,
+    note: "App-specific password required (appleid.apple.com → Sign-In & Security).",
+  },
+  {
+    id: "custom", label: "Other / custom (enter manually)",
+    match: [],
+    note: "Enter your provider's IMAP and SMTP settings. 993 = IMAP SSL; SMTP 587 = STARTTLS, 465 = SSL.",
+  },
+];
+
+const presetForEmail = (email) => {
+  const domain = (email || "").split("@")[1]?.toLowerCase() || "";
+  return PRESETS.find((p) => p.match.some((d) => domain === d || domain.endsWith("." + d)));
+};
+
 // Hosted mail providers where the recipient sees the provider's IP (not yours),
 // and where logging in from rotating IPs tends to trip anti-fraud. Proxying these
 // rarely helps and can cause lockouts — so we warn when proxy is enabled on one.
@@ -36,6 +86,7 @@ export default function Mailboxes() {
     setBusy(true);
     try {
       const body = { ...editing };
+      delete body._preset; // UI-only field, not part of the model
       if (editing.id && !body.password) delete body.password; // keep existing
       if (editing.id) await api.mailboxes.update(editing.id, body);
       else await api.mailboxes.create(body);
@@ -147,13 +198,54 @@ function MailboxForm({ value, onChange }) {
     const raw = e.target.value;
     onChange({ ...value, [k]: raw === "" ? null : Number(raw) });
   };
+
+  // Apply a preset's host/port/TLS. Username defaults to the email if unset.
+  const applyPreset = (preset) => {
+    if (!preset || preset.id === "custom") { onChange({ ...value, _preset: "custom" }); return; }
+    onChange({
+      ...value, _preset: preset.id,
+      imap_host: preset.imap_host, imap_port: preset.imap_port, imap_use_ssl: preset.imap_use_ssl,
+      smtp_host: preset.smtp_host, smtp_port: preset.smtp_port, smtp_use_tls: preset.smtp_use_tls,
+      username: value.username || value.email_address,
+    });
+  };
+
+  // When the email domain changes and no preset was chosen manually, autodetect one.
+  const onEmail = (e) => {
+    const email = e.target.value;
+    const next = { ...value, email_address: email };
+    const guess = presetForEmail(email);
+    if (guess && value._preset !== "custom" && !value.id) {
+      Object.assign(next, {
+        _preset: guess.id,
+        imap_host: guess.imap_host, imap_port: guess.imap_port, imap_use_ssl: guess.imap_use_ssl,
+        smtp_host: guess.smtp_host, smtp_port: guess.smtp_port, smtp_use_tls: guess.smtp_use_tls,
+        username: value.username || email,
+      });
+    }
+    onChange(next);
+  };
+
+  const activePreset = PRESETS.find((p) => p.id === value._preset)
+    || presetForEmail(value.email_address) || PRESETS.find((p) => p.id === "custom");
+
   return (
     <div>
       <Field label="Display name"><input className="input" value={value.name} onChange={set("name")} placeholder="Sales inbox" /></Field>
       <div className="field-row">
-        <Field label="Email address"><input className="input" value={value.email_address} onChange={set("email_address")} placeholder="you@domain.com" /></Field>
+        <Field label="Email address"><input className="input" value={value.email_address} onChange={onEmail} placeholder="you@domain.com" /></Field>
         <Field label="Username"><input className="input" value={value.username} onChange={set("username")} placeholder="usually your email" /></Field>
       </div>
+      <Field label="Provider">
+        <select className="input" value={activePreset.id} onChange={(e) => applyPreset(PRESETS.find((p) => p.id === e.target.value))}>
+          {PRESETS.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+        </select>
+      </Field>
+      {activePreset.note && (
+        <div className="card card-pad" style={{ margin: "0 0 14px", padding: "10px 12px", borderColor: "var(--warning)" }}>
+          <span className="page-sub">{activePreset.note}</span>
+        </div>
+      )}
       <Field label={value.id ? "Password (leave blank to keep)" : "Password / app password"}>
         <input className="input" type="password" value={value.password} onChange={set("password")} placeholder="••••••••" />
       </Field>

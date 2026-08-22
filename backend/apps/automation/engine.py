@@ -424,17 +424,36 @@ def _maybe_schedule_reply(mailbox: Mailbox, incoming: EmailMessage, config: Conf
 # --------------------------------------------------------------------------- #
 # Sending scheduled replies
 # --------------------------------------------------------------------------- #
-def send_due_replies(workspace=None) -> int:
-    """Send any scheduled outgoing messages whose delay has elapsed.
+# Send-retry policy. A transient SMTP failure — greylisting, a rate-limit blip, a
+# dropped TLS connection — shouldn't lose a reply, which for a marketing app is the
+# reply a client is waiting on. So a failed send is re-queued with growing backoff
+# and only marked FAILED (and alerted loudly) once SEND_MAX_ATTEMPTS is spent.
+SEND_MAX_ATTEMPTS = 5
+_RETRY_BACKOFF_SECONDS = [60, 300, 900, 1800, 3600]  # 1m, 5m, 15m, 30m, 60m
 
+
+def _retry_delay(attempt: int) -> timedelta:
+    idx = min(max(attempt - 1, 0), len(_RETRY_BACKOFF_SECONDS) - 1)
+    return timedelta(seconds=_RETRY_BACKOFF_SECONDS[idx])
+
+
+def send_due_replies(workspace=None) -> int:
+    """Send scheduled outgoing messages whose delay has elapsed.
+
+    Transient failures are retried with backoff (see SEND_MAX_ATTEMPTS); a message
+    is due when its schedule time has passed AND it isn't waiting on a retry delay.
     Pass ``workspace`` to restrict sending to a single workspace (the on-demand run).
     """
     now = timezone.now()
-    due = EmailMessage.objects.filter(
-        direction=EmailMessage.Direction.OUTGOING,
-        status=EmailMessage.Status.SCHEDULED,
-        scheduled_for__lte=now,
-    ).select_related("mailbox")
+    due = (
+        EmailMessage.objects.filter(
+            direction=EmailMessage.Direction.OUTGOING,
+            status=EmailMessage.Status.SCHEDULED,
+            scheduled_for__lte=now,
+        )
+        .filter(Q(next_attempt_at__isnull=True) | Q(next_attempt_at__lte=now))
+        .select_related("mailbox")
+    )
     if workspace is not None:
         due = due.filter(workspace=workspace)
 
@@ -447,20 +466,45 @@ def send_due_replies(workspace=None) -> int:
         # leave the reply scheduled — it goes out once they pay, nothing is lost.
         if not workspace_can_send(message.workspace):
             continue
+
         try:
             _send_message(message)
-            message.status = EmailMessage.Status.SENT
-            message.sent_at = timezone.now()
-            message.error = ""
-            sent += 1
-            notify(message.workspace, "sent", f"📤 <b>{message.mailbox.name}</b> sent reply:\n{message.subject}\nto {message.to_addr}")
-            SystemEvent.log("engine", f"Sent reply to {message.to_addr}", "success", workspace=message.workspace)
         except Exception as exc:  # noqa: BLE001
-            message.status = EmailMessage.Status.FAILED
+            message.attempt_count += 1
             message.error = str(exc)
-            notify(message.workspace, "error", f"⚠️ Failed to send reply to {message.to_addr}: {exc}")
-            SystemEvent.log("engine", f"Send failed to {message.to_addr}: {exc}", "error", workspace=message.workspace)
-        message.save(update_fields=["status", "sent_at", "error"])
+            if message.attempt_count >= SEND_MAX_ATTEMPTS:
+                # Out of retries — this is the loud one: a reply we could not deliver.
+                message.status = EmailMessage.Status.FAILED
+                message.next_attempt_at = None
+                notify(message.workspace, "error",
+                       f"⛔ <b>Undelivered reply</b> to {message.to_addr} after "
+                       f"{message.attempt_count} attempts:\n{message.subject}\n{exc}")
+                SystemEvent.log("engine",
+                                f"Send permanently failed to {message.to_addr} after "
+                                f"{message.attempt_count} attempts: {exc}",
+                                "error", workspace=message.workspace)
+            else:
+                # Transient — re-queue quietly, no Telegram spam for a retry.
+                message.next_attempt_at = now + _retry_delay(message.attempt_count)
+                SystemEvent.log("engine",
+                                f"Send to {message.to_addr} failed (attempt "
+                                f"{message.attempt_count}/{SEND_MAX_ATTEMPTS}), retry at "
+                                f"{timezone.localtime(message.next_attempt_at):%H:%M}: {exc}",
+                                "warning", workspace=message.workspace)
+            message.save(update_fields=["status", "attempt_count", "next_attempt_at", "error"])
+            continue
+
+        message.status = EmailMessage.Status.SENT
+        message.sent_at = timezone.now()
+        message.attempt_count += 1
+        message.error = ""
+        message.next_attempt_at = None
+        sent += 1
+        notify(message.workspace, "sent", f"📤 <b>{message.mailbox.name}</b> sent reply:\n{message.subject}\nto {message.to_addr}")
+        SystemEvent.log("engine", f"Sent reply to {message.to_addr}"
+                        + (f" (after {message.attempt_count} attempts)" if message.attempt_count > 1 else ""),
+                        "success", workspace=message.workspace)
+        message.save(update_fields=["status", "sent_at", "attempt_count", "error", "next_attempt_at"])
     return sent
 
 

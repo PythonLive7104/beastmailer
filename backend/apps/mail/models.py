@@ -68,6 +68,10 @@ class EmailMessage(models.Model):
     received_at = models.DateTimeField(null=True, blank=True)
     sent_at = models.DateTimeField(null=True, blank=True)
     error = models.TextField(blank=True, default="")
+    # Send-retry bookkeeping: how many send attempts a reply has had, and the
+    # earliest time to try again after a transient failure.
+    attempt_count = models.PositiveIntegerField(default=0)
+    next_attempt_at = models.DateTimeField(null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
 
