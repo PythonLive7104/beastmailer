@@ -46,11 +46,16 @@ def _imap_connect(mailbox: Mailbox) -> imaplib.IMAP4:
 
 def test_connection(mailbox: Mailbox) -> dict:
     """Verify IMAP login and SMTP login without sending anything."""
-    result = {"imap": False, "smtp": False, "error": ""}
+    result = {"imap": False, "smtp": False, "folders": [], "error": ""}
     try:
         conn = _imap_connect(mailbox)
-        conn.select("INBOX", readonly=True)
-        conn.logout()
+        try:
+            # Surfacing the folder list here is how a user confirms we actually
+            # found their Spam folder, without waiting for a poll to prove it.
+            result["folders"] = folders_to_poll(mailbox, conn)
+            conn.select("INBOX", readonly=True)
+        finally:
+            conn.logout()
         result["imap"] = True
     except Exception as exc:  # noqa: BLE001 - report any failure to the UI
         result["error"] = f"IMAP: {exc}"
@@ -265,54 +270,201 @@ def next_tick_seconds() -> int:
 
 
 # --------------------------------------------------------------------------- #
+# Folder discovery
+# --------------------------------------------------------------------------- #
+# IMAP never standardised a name for the spam folder: Gmail uses "[Gmail]/Spam"
+# (localised on non-English accounts), Yahoo "Bulk Mail", Outlook "Junk", others
+# "Spam" or "Junk E-mail". So we look for the RFC 6154 \Junk special-use flag first —
+# servers set it whatever the display name — and only fall back to matching known
+# names for servers too old to advertise special-use.
+_SPAM_FLAGS = {"\\junk", "\\spam"}
+_SPAM_NAMES = {
+    "spam", "junk", "junk mail", "junkmail", "junk e-mail", "junk email",
+    "bulk", "bulk mail", "[gmail]/spam", "[google mail]/spam",
+    "inbox.spam", "inbox.junk", "inbox/spam", "inbox/junk",
+}
+# Never poll these, even if a name heuristic matches: ingesting our own sent mail
+# or a trashed/archived copy would re-reply to threads that are already handled.
+_SKIP_FLAGS = {"\\sent", "\\drafts", "\\trash", "\\all", "\\archive", "\\noselect"}
+
+# A LIST response line: (\HasNoChildren \Junk) "/" "[Gmail]/Spam"
+_LIST_LINE = re.compile(r'^\((?P<flags>[^)]*)\)\s+(?:"(?:[^"]*)"|NIL)\s+(?P<name>.*)$')
+
+# How many messages to take the first time a folder is polled. Without this, a new
+# mailbox would replay its entire history and reply to years-old mail.
+FIRST_RUN_LIMIT = 10
+
+
+def _list_folders(conn) -> list[tuple[str, set[str]]]:
+    """Return [(folder_name, lowercased_flags)] for every folder on the account."""
+    typ, data = conn.list()
+    if typ != "OK" or not data:
+        return []
+    folders = []
+    for item in data:
+        if not item:
+            continue
+        # A name sent as an IMAP literal arrives as (header_bytes, name_bytes).
+        if isinstance(item, tuple):
+            line, literal = item[0], item[1]
+        else:
+            line, literal = item, None
+        if isinstance(line, bytes):
+            line = line.decode("utf-8", "replace")
+        match = _LIST_LINE.match(line.strip())
+        if not match:
+            continue
+        flags = {f.lower() for f in match.group("flags").split()}
+        if literal is not None:
+            name = literal.decode("utf-8", "replace")
+        else:
+            name = match.group("name").strip().strip('"')
+        if name:
+            folders.append((name, flags))
+    return folders
+
+
+def detect_spam_folders(conn) -> list[str]:
+    """Find the account's spam folder(s), by special-use flag then by name."""
+    by_flag, by_name = [], []
+    for name, flags in _list_folders(conn):
+        if flags & _SKIP_FLAGS:
+            continue
+        if flags & _SPAM_FLAGS:
+            by_flag.append(name)
+        elif name.lower() in _SPAM_NAMES:
+            by_name.append(name)
+    # A flagged folder is authoritative; the name list is only a fallback.
+    return by_flag or by_name
+
+
+def folders_to_poll(mailbox: Mailbox, conn) -> list[str]:
+    """INBOX first, then the spam folder(s), then any manual extras for this account."""
+    folders = ["INBOX"]
+    if mailbox.scan_spam:
+        try:
+            folders += detect_spam_folders(conn)
+        except Exception as exc:  # noqa: BLE001 - a failed LIST must never cost us INBOX
+            SystemEvent.log("mailbox", f"Could not list folders on {mailbox.name}: {exc}",
+                            "warning", workspace=mailbox.workspace)
+    folders += mailbox.extra_folder_list
+
+    seen, ordered = set(), []
+    for folder in folders:
+        if folder.lower() not in seen:
+            seen.add(folder.lower())
+            ordered.append(folder)
+    return ordered
+
+
+def _quote_folder(folder: str) -> str:
+    """Quote a mailbox name for SELECT — names like "Bulk Mail" contain spaces."""
+    return '"%s"' % folder.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _uidvalidity(conn) -> int:
+    """The UIDVALIDITY of the currently selected folder, or 0 if unreported."""
+    typ, data = conn.response("UIDVALIDITY")
+    if data and data[0]:
+        try:
+            return int(data[0])
+        except (TypeError, ValueError):
+            pass
+    return 0
+
+
+# --------------------------------------------------------------------------- #
 # Polling
 # --------------------------------------------------------------------------- #
 def poll_mailbox(mailbox: Mailbox) -> int:
-    """Fetch new incoming messages, record them, and schedule any auto-replies.
+    """Fetch new incoming messages from every watched folder, record them, and
+    schedule any auto-replies.
 
     Returns the number of new messages ingested.
     """
     config = Config.load(mailbox.workspace)
+    cursors = dict(mailbox.folder_cursors or {})
+    # Mailboxes from before per-folder cursors only tracked INBOX, in last_seen_uid;
+    # seeding from it stops the first multi-folder poll replaying the inbox.
+    if "INBOX" not in cursors and mailbox.last_seen_uid:
+        cursors["INBOX"] = {"uid": mailbox.last_seen_uid}
+
     ingested = 0
+    folder_errors: list[str] = []
     conn = _imap_connect(mailbox)
     try:
-        conn.select("INBOX")
-        # UIDs greater than the last one we've seen = new since last poll.
-        criterion = f"UID {mailbox.last_seen_uid + 1}:*" if mailbox.last_seen_uid else "ALL"
-        typ, data = conn.uid("search", None, criterion)
-        if typ != "OK" or not data or not data[0]:
-            return 0
-        uids = [int(u) for u in data[0].split()]
-        # On a very first run (ALL), avoid replaying the whole history — only take
-        # the newest handful so the client isn't spammed with replies to old mail.
-        if not mailbox.last_seen_uid:
-            uids = uids[-10:]
-
-        for uid in uids:
-            if uid <= mailbox.last_seen_uid:
-                continue
-            typ, msg_data = conn.uid("fetch", str(uid), "(RFC822)")
-            if typ != "OK" or not msg_data or not msg_data[0]:
-                continue
-            raw = msg_data[0][1]
-            msg = email.message_from_bytes(raw)
-            ingested += _ingest_incoming(mailbox, uid, msg, config)
-            mailbox.last_seen_uid = max(mailbox.last_seen_uid, uid)
+        for folder in folders_to_poll(mailbox, conn):
+            try:
+                ingested += _poll_folder(mailbox, conn, folder, cursors, config)
+            except Exception as exc:  # noqa: BLE001
+                # INBOX failing means the mailbox itself is broken — let run_once
+                # record and alert on it. A secondary folder that's gone, renamed or
+                # unreadable is not worth losing the rest of the poll over.
+                if folder.upper() == "INBOX":
+                    raise
+                folder_errors.append(f"{folder}: {exc}")
+                SystemEvent.log("mailbox", f"Skipped folder '{folder}' on {mailbox.name}: {exc}",
+                                "warning", workspace=mailbox.workspace)
     finally:
         try:
             conn.logout()
         except Exception:  # noqa: BLE001
             pass
+
+    mailbox.folder_cursors = cursors
+    mailbox.last_seen_uid = int((cursors.get("INBOX") or {}).get("uid") or 0)
     mailbox.last_polled_at = timezone.now()
-    mailbox.last_error = ""
-    mailbox.save(update_fields=["last_seen_uid", "last_polled_at", "last_error"])
+    mailbox.last_error = "; ".join(folder_errors)
+    mailbox.save(update_fields=["last_seen_uid", "folder_cursors", "last_polled_at", "last_error"])
     return ingested
 
 
-def _ingest_incoming(mailbox: Mailbox, uid: int, msg, config: Config) -> int:
+def _poll_folder(mailbox: Mailbox, conn, folder: str, cursors: dict, config: Config) -> int:
+    """Ingest everything new in one folder, advancing that folder's cursor."""
+    typ, _ = conn.select(_quote_folder(folder))
+    if typ != "OK":
+        raise RuntimeError(f"SELECT failed ({typ})")
+
+    state = cursors.get(folder) or {}
+    last_uid = int(state.get("uid") or 0)
+    uidvalidity = _uidvalidity(conn)
+    # A changed UIDVALIDITY means the server renumbered the folder, so our stored UID
+    # now points at nothing (RFC 3501 §2.3.1.1) — safer to restart than to skip mail.
+    if uidvalidity and state.get("uidvalidity") not in (None, uidvalidity):
+        last_uid = 0
+
+    # UIDs greater than the last one we've seen = new since last poll.
+    criterion = f"UID {last_uid + 1}:*" if last_uid else "ALL"
+    typ, data = conn.uid("search", None, criterion)
+    if typ != "OK":
+        raise RuntimeError(f"SEARCH failed ({typ})")
+    uids = [int(u) for u in data[0].split()] if data and data[0] else []
+    if not last_uid:
+        uids = uids[-FIRST_RUN_LIMIT:]
+
+    ingested = 0
+    highest = last_uid
+    for uid in uids:
+        # "UID n:*" always returns the highest UID even when it is below n.
+        if uid <= last_uid:
+            continue
+        typ, msg_data = conn.uid("fetch", str(uid), "(RFC822)")
+        if typ != "OK" or not msg_data or not msg_data[0]:
+            continue
+        raw = msg_data[0][1]
+        msg = email.message_from_bytes(raw)
+        ingested += _ingest_incoming(mailbox, uid, msg, config, folder)
+        highest = max(highest, uid)
+
+    cursors[folder] = {"uid": highest, "uidvalidity": uidvalidity}
+    return ingested
+
+
+def _ingest_incoming(mailbox: Mailbox, uid: int, msg, config: Config, folder: str = "INBOX") -> int:
     message_id = (msg.get("Message-ID") or "").strip()
     # De-dupe within this workspace's mail (same Message-ID could legitimately land in
-    # two different users' mailboxes).
+    # two different users' mailboxes). This is also what keeps a message filed in both
+    # INBOX and Spam — or moved between them between polls — from being replied to twice.
     if message_id and EmailMessage.objects.filter(message_id=message_id, workspace=mailbox.workspace).exists():
         return 0
 
@@ -339,6 +491,7 @@ def _ingest_incoming(mailbox: Mailbox, uid: int, msg, config: Config) -> int:
         message_id=message_id,
         in_reply_to=(msg.get("In-Reply-To") or "").strip(),
         imap_uid=uid,
+        folder=folder,
         subject=subject,
         thread_key=thread_key,
         from_addr=from_addr,
@@ -349,7 +502,11 @@ def _ingest_incoming(mailbox: Mailbox, uid: int, msg, config: Config) -> int:
         received_at=timezone.now(),
     )
 
-    notify(mailbox.workspace, "received", f"📥 <b>{mailbox.name}</b> received:\n{subject}\nfrom {from_addr}")
+    # Call out the folder when it isn't the inbox — "this one was in Spam" is exactly
+    # what the user needs to know from the alert.
+    where = "" if folder.upper() == "INBOX" else f" in {folder}"
+    notify(mailbox.workspace, "received",
+           f"📥 <b>{mailbox.name}</b> received{where}:\n{subject}\nfrom {from_addr}")
     if config.auto_reply_enabled and not _is_auto_message(msg, from_addr):
         _maybe_schedule_reply(mailbox, incoming, config)
     return 1

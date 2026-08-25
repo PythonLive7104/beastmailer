@@ -41,6 +41,9 @@ class EmailMessage(models.Model):
     message_id = models.CharField(max_length=512, blank=True, default="", db_index=True)
     in_reply_to = models.CharField(max_length=512, blank=True, default="")
     imap_uid = models.PositiveBigIntegerField(null=True, blank=True)
+    # Which IMAP folder an incoming message was found in ("INBOX", "[Gmail]/Spam", ...).
+    # UIDs repeat across folders, so this is what makes imap_uid unambiguous.
+    folder = models.CharField(max_length=255, blank=True, default="")
 
     subject = models.CharField(max_length=998, blank=True, default="")
     thread_key = models.CharField(max_length=998, blank=True, default="", db_index=True)

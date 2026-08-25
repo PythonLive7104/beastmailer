@@ -13,6 +13,7 @@ class EmailMessageSerializer(serializers.ModelSerializer):
         fields = [
             "id", "mailbox", "mailbox_name", "direction", "status", "event",
             "subject", "thread_key", "from_addr", "from_name", "to_addr", "body", "is_html",
+            "folder",
             "matched_rule", "reply_to_message",
             "scheduled_for", "received_at", "sent_at", "timestamp", "error",
             "attempt_count", "next_attempt_at", "created_at",

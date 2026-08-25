@@ -26,6 +26,17 @@ class Mailbox(models.Model):
     password_encrypted = models.TextField(blank=True, default="")
 
     is_active = models.BooleanField(default=True)
+    # Client mail routinely lands in Spam, so by default we poll the account's junk
+    # folder alongside INBOX. Its name varies by provider ("[Gmail]/Spam", "Bulk
+    # Mail", "Junk"), so the engine finds it by the RFC 6154 \Junk flag, not by name.
+    scan_spam = models.BooleanField(
+        default=True,
+        help_text="Also scan this account's Spam/Junk folder for incoming mail.",
+    )
+    extra_folders = models.CharField(
+        max_length=500, blank=True, default="",
+        help_text="Extra IMAP folders to scan, comma-separated (e.g. 'Promotions, Archive').",
+    )
     # When on, outgoing SMTP for this mailbox is routed through a random proxy
     # from the workspace pool (see apps.proxies). Off = direct connection.
     use_proxy = models.BooleanField(default=False)
@@ -41,6 +52,11 @@ class Mailbox(models.Model):
     )
 
     last_polled_at = models.DateTimeField(null=True, blank=True)
+    # Per-folder read cursor: {"INBOX": {"uid": 42, "uidvalidity": 7}, ...}. IMAP UIDs
+    # are only unique within one folder, so every folder needs its own high-water mark.
+    folder_cursors = models.JSONField(default=dict, blank=True)
+    # The INBOX cursor, mirrored here for the UI and for mailboxes created before
+    # folder_cursors existed (which the engine seeds from on the first poll).
     last_seen_uid = models.PositiveBigIntegerField(default=0)
     last_error = models.TextField(blank=True, default="")
 
@@ -53,6 +69,10 @@ class Mailbox(models.Model):
 
     def __str__(self):
         return f"{self.name} <{self.email_address}>"
+
+    @property
+    def extra_folder_list(self) -> list[str]:
+        return [f.strip() for f in (self.extra_folders or "").split(",") if f.strip()]
 
     # Password is set/read through this property so callers never touch ciphertext.
     @property

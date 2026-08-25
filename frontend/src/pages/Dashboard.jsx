@@ -122,7 +122,10 @@ export default function Dashboard() {
                   <td><StatusBadge status={m.status} /></td>
                   <td>
                     <div className="subj">{m.subject || "—"}</div>
-                    <div className="muted">{m.mailbox_name}</div>
+                    <div className="muted">
+                      {m.mailbox_name}
+                      {m.folder && m.folder.toUpperCase() !== "INBOX" && ` · ${m.folder}`}
+                    </div>
                   </td>
                   <td className="muted">{m.direction === "incoming" ? m.from_addr : m.to_addr}</td>
                 </tr>

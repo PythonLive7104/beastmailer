@@ -8,6 +8,7 @@ const BLANK = {
   imap_host: "", imap_port: 993, imap_use_ssl: true,
   smtp_host: "", smtp_port: 587, smtp_use_tls: true,
   password: "", is_active: true, use_proxy: false,
+  scan_spam: true, extra_folders: "",
   poll_interval_seconds: 10, reply_delay_minutes: 10,
 };
 
@@ -104,7 +105,7 @@ export default function Mailboxes() {
     toast("Testing connection…");
     try {
       const r = await api.mailboxes.test(row.id);
-      if (r.imap && r.smtp) toast("✓ IMAP and SMTP OK");
+      if (r.imap && r.smtp) toast(`✓ IMAP and SMTP OK · scanning ${(r.folders || ["INBOX"]).join(", ")}`);
       else toast(r.error || "Connection failed", "err");
     } catch { toast("Connection test failed", "err"); }
   };
@@ -147,6 +148,7 @@ export default function Mailboxes() {
                 <td>
                   <span className={`badge ${m.is_active ? "badge-sent" : "badge-neutral"}`}>{m.is_active ? "active" : "paused"}</span>
                   {m.use_proxy && <span className="badge badge-received" style={{ marginLeft: 6 }} title="Outgoing SMTP routed through the proxy pool"><Icon.proxy /> proxy</span>}
+                  {m.scan_spam && <span className="badge badge-neutral" style={{ marginLeft: 6 }} title="Spam/Junk folder is scanned as well as the inbox">spam</span>}
                   {m.last_error && <span className="badge badge-failed" style={{ marginLeft: 6 }}>error</span>}
                 </td>
                 <td className="muted mono" title={
@@ -256,6 +258,15 @@ function MailboxForm({ value, onChange }) {
         <Field label="IMAP port"><input className="input" type="number" value={value.imap_port} onChange={set("imap_port")} /></Field>
       </div>
       <div className="row" style={{ marginBottom: 14 }}><Switch checked={value.imap_use_ssl} onChange={(v) => onChange({ ...value, imap_use_ssl: v })} /><span className="page-sub">Use SSL</span></div>
+      <div className="row" style={{ marginBottom: 10 }}><Switch checked={value.scan_spam} onChange={(v) => onChange({ ...value, scan_spam: v })} /><span className="page-sub">Also scan Spam / Junk — catch client mail the provider misfiled</span></div>
+      <Field label="Extra folders to scan (optional)">
+        <input className="input" value={value.extra_folders || ""} onChange={set("extra_folders")}
+          placeholder="Promotions, Archive" />
+      </Field>
+      <div className="hint-inline" style={{ marginBottom: 14 }}>
+        The inbox is always scanned. The Spam folder is found automatically, whatever your provider
+        calls it. Comma-separate any extras, using the exact folder names your provider shows.
+      </div>
 
       <h4 style={{ margin: "10px 0 12px", color: "var(--text-muted)" }}>Outgoing (SMTP)</h4>
       <div className="field-row">

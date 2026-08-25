@@ -62,7 +62,12 @@ export default function Listeners() {
                     <StatusBadge status={m.status} />
                     {m.attempt_count > 1 && <span className="muted" style={{ marginLeft: 6, fontSize: 12 }}>· try {m.attempt_count}</span>}
                   </td>
-                  <td className="subj">{m.subject}</td>
+                  <td className="subj">
+                    {m.subject}
+                    {m.folder && m.folder.toUpperCase() !== "INBOX" && (
+                      <span className="badge badge-neutral" style={{ marginLeft: 6 }} title={`Found in ${m.folder}`}>{m.folder}</span>
+                    )}
+                  </td>
                   <td className="muted">{m.direction === "incoming" ? m.from_addr : m.to_addr}</td>
                 </tr>
               ))}
