@@ -2,7 +2,7 @@ from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from apps.automation.engine import render_template
+from apps.automation.engine import render_template, sample_context
 from apps.core.mixins import WorkspaceScopedMixin
 
 from .models import Placeholder, ReplyTemplate, Rule
@@ -22,13 +22,7 @@ class ReplyTemplateViewSet(WorkspaceScopedMixin, viewsets.ModelViewSet):
     def preview(self, request, pk=None):
         """Render this template against sample context so the user sees the result."""
         template = self.get_object()
-        context = {
-            "sender_name": "Jane Doe",
-            "sender_email": "jane.doe@example.com",
-            "original_subject": "Project Inquiry: New warehouse build",
-            "mailbox_name": "Sales inbox",
-            "date": "Thursday, July 02, 2026",
-        }
+        context = sample_context()
         return Response({
             "subject": render_template(template.subject, context, workspace=template.workspace),
             "body": render_template(template.body, context, workspace=template.workspace),

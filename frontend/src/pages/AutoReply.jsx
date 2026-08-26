@@ -3,19 +3,64 @@ import { api } from "../api";
 import { Icon } from "../icons";
 import { Field, Loader, Modal, Switch, useToast } from "../components/ui";
 
-const DYNAMIC_KEYS = [
-  ["sender_name", "recipient's name"],
-  ["sender_email", "recipient's email"],
-  ["original_subject", "subject they sent"],
-  ["mailbox_name", "this mailbox's name"],
-  ["date", "today's date"],
+// Mirrors build_context() in apps/automation/engine.py. Adding a tag there means
+// adding it here too, or the client never discovers it.
+// The first two groups cover almost every template; the rest sit behind "More tags".
+const TOKEN_GROUPS = [
+  ["Sender", [
+    ["sender_name", "Their full name, read from the From header. Falls back to a tidied-up address when they send no name."],
+    ["sender_first_name", "Just their first name — Jane."],
+    ["sender_last_name", "Just their surname — Doe. Empty if they only gave one name."],
+    ["sender_email", "The address they wrote in from — jane.doe@example.com."],
+    ["sender_user", "The part of their address before the @ — jane.doe."],
+    ["sender_domain", "The part after the @ — example.com. Handy for naming their company."],
+  ]],
+  ["Their message", [
+    ["original_subject", "The subject line exactly as they sent it, Re: and all."],
+    ["subject_clean", "The same subject with any Re: or Fwd: stripped off."],
+    ["quoted_body", "Their whole message with > in front of every line, the way a normal reply quotes."],
+    ["original_body", "Their message as they wrote it, with no quote marks added."],
+    ["ticket_id", "An 8-character reference for this conversation. Always the same for the same thread, so it is safe to quote back."],
+    ["received_date", "The day their email landed in the mailbox."],
+    ["received_time", "The time their email landed."],
+    ["message_id", "The raw Message-ID header. Mostly useful for tracing a specific email."],
+  ]],
+  ["Your side", [
+    ["mailbox_name", "The name you gave the mailbox that is doing the replying."],
+    ["mailbox_email", "The address this reply is being sent from."],
+    ["mailbox_domain", "Your own domain — the part of your address after the @."],
+    ["workspace_name", "The name of your workspace."],
+    ["rule_name", "The rule that matched this email and triggered the reply."],
+    ["template_name", "The name of this template."],
+  ]],
+  ["Date & time", [
+    ["greeting", "Good morning, Good afternoon or Good evening, chosen from the time of day."],
+    ["date", "Today written out in full — Wednesday, August 26, 2026."],
+    ["date_short", "Today in year-month-day order — 2026-08-26."],
+    ["date_us", "Today in US order, month first — 08/26/2026."],
+    ["date_eu", "Today in day-first order — 26/08/2026."],
+    ["time", "The time the reply is sent, 12-hour — 8:03 PM."],
+    ["time_24", "The time the reply is sent, 24-hour — 20:03."],
+    ["datetime", "Today's date and the time together, in one line."],
+    ["day_name", "The name of today's weekday — Wednesday."],
+    ["month_name", "The name of the current month — August."],
+    ["year", "The four-digit year — 2026."],
+    ["timezone", "The timezone the times above are in — UTC unless you change it."],
+  ]],
+  ["Deadlines — change the number", [
+    ["date_plus_3", "3 days from today. Change the 3 to any number of days."],
+    ["date_minus_1", "1 day before today. Change the 1 to any number of days."],
+    ["business_day_plus_2", "2 working days from today, skipping Saturday and Sunday. From a Friday this lands on Tuesday."],
+  ]],
+  ["Random — fresh on every send", [
+    ["ran_letter_10", "10 random letters, different in every email you send."],
+    ["ran_digit_6", "6 random digits. Change the 6 for a different length."],
+    ["ran_alnum_12", "12 random letters and digits mixed together."],
+    ["ran_hex_8", "8 random hex characters — 0-9 and a-f."],
+    ["uuid", "A one-off unique identifier that is never repeated."],
+  ]],
 ];
-const RANDOM_KEYS = [
-  ["ran_letter_10", "10 random letters"],
-  ["ran_digit_6", "6 random digits"],
-  ["ran_alnum_12", "12 letters + digits"],
-  ["ran_hex_8", "8 hex chars"],
-];
+const ALWAYS_SHOWN = 2;
 
 const BLANK = {
   name: "",
@@ -24,6 +69,18 @@ const BLANK = {
   is_html: false,
   is_active: true,
 };
+
+/* Decide which way a chip's tooltip should open. The palette sits inside a scrolling
+   modal, so a bubble anchored left on a chip near the right edge gets clipped. Measure
+   the room left in the row on hover and flip the anchor when it won't fit. */
+const TIP_WIDTH = 244;
+function tipAlign(e) {
+  const chip = e.currentTarget;
+  const row = chip.parentElement?.getBoundingClientRect();
+  if (!row) return;
+  const box = chip.getBoundingClientRect();
+  chip.dataset.tipAlign = row.right - box.left < TIP_WIDTH ? "end" : "start";
+}
 
 // Enough of a signal to offer the toggle, without nagging about an odd < in prose.
 const LOOKS_LIKE_HTML = /<(html|body|div|table|p|br|a|span|img|h[1-6])\b[^>]*>/i;
@@ -47,6 +104,7 @@ export default function AutoReply() {
   const [links, setLinks] = useState([]);
   const [editing, setEditing] = useState(null);
   const [preview, setPreview] = useState(null);
+  const [showAllTokens, setShowAllTokens] = useState(false);
   const [busy, setBusy] = useState(false);
   const toast = useToast();
 
@@ -164,18 +222,53 @@ export default function AutoReply() {
           )}
 
           <div style={{ marginTop: 16 }}>
-            <div className="page-sub" style={{ marginBottom: 6 }}>Dynamic — filled in per message:</div>
-            <div className="row" style={{ flexWrap: "wrap", gap: 6 }}>
-              {DYNAMIC_KEYS.map(([k, hint]) => <span className="chip" key={k} title={hint} onClick={() => insert(k)}>{`{{${k}}}`}</span>)}
-            </div>
-            <div className="page-sub" style={{ margin: "10px 0 6px" }}>Random — fresh each send (change the number for length):</div>
-            <div className="row" style={{ flexWrap: "wrap", gap: 6 }}>
-              {RANDOM_KEYS.map(([k, hint]) => <span className="chip" key={k} title={hint} onClick={() => insert(k)}>{`{{${k}}}`}</span>)}
-            </div>
+            {(showAllTokens ? TOKEN_GROUPS : TOKEN_GROUPS.slice(0, ALWAYS_SHOWN)).map(([label, keys]) => (
+              <div key={label}>
+                <div className="page-sub" style={{ margin: "10px 0 6px" }}>{label}:</div>
+                <div className="row" style={{ flexWrap: "wrap", gap: 6 }}>
+                  {keys.map(([k, hint]) => (
+                    <span
+                      className="chip"
+                      key={k}
+                      role="button"
+                      tabIndex={0}
+                      aria-label={`Insert {{${k}}} — ${hint}`}
+                      data-tip={hint}
+                      onMouseEnter={tipAlign}
+                      onFocus={tipAlign}
+                      onClick={() => insert(k)}
+                      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); insert(k); } }}
+                    >{`{{${k}}}`}</span>
+                  ))}
+                </div>
+              </div>
+            ))}
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              style={{ marginTop: 10 }}
+              onClick={() => setShowAllTokens((v) => !v)}
+            >
+              {showAllTokens
+                ? "Show fewer tags"
+                : `More tags — dates, deadlines, random (${TOKEN_GROUPS.slice(ALWAYS_SHOWN).reduce((n, [, k]) => n + k.length, 0)})`}
+            </button>
             {placeholders.length > 0 && <>
               <div className="page-sub" style={{ margin: "10px 0 6px" }}>Your placeholders:</div>
               <div className="row" style={{ flexWrap: "wrap", gap: 6 }}>
-                {placeholders.map((p) => <span className="chip" key={p.id} onClick={() => insert(p.key)}>{`{{${p.key}}}`}</span>)}
+                {placeholders.map((p) => (
+                  <span
+                    className="chip"
+                    key={p.id}
+                    role="button"
+                    tabIndex={0}
+                    data-tip={p.static_value ? `Your own placeholder. Inserts: ${p.static_value}` : "Your own placeholder. No value set yet — edit it on the Placeholders page."}
+                    onMouseEnter={tipAlign}
+                    onFocus={tipAlign}
+                    onClick={() => insert(p.key)}
+                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); insert(p.key); } }}
+                  >{`{{${p.key}}}`}</span>
+                ))}
               </div>
             </>}
           </div>
@@ -183,7 +276,19 @@ export default function AutoReply() {
             <div style={{ marginTop: 12 }}>
               <div className="page-sub" style={{ marginBottom: 6 }}>Insert link:</div>
               <div className="row" style={{ flexWrap: "wrap", gap: 6 }}>
-                {links.map((l) => <span className="chip" key={l.id} onClick={() => insertText(l.url)} title={l.url}>🔗 {l.name}</span>)}
+                {links.map((l) => (
+                  <span
+                    className="chip"
+                    key={l.id}
+                    role="button"
+                    tabIndex={0}
+                    data-tip={`Inserts this tracked link: ${l.url}`}
+                    onMouseEnter={tipAlign}
+                    onFocus={tipAlign}
+                    onClick={() => insertText(l.url)}
+                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); insertText(l.url); } }}
+                  >🔗 {l.name}</span>
+                ))}
               </div>
             </div>
           )}

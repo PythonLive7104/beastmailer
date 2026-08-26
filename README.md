@@ -54,7 +54,7 @@ python3 -m venv venv                 # already created during setup
 venv/bin/pip install -r requirements.txt
 venv/bin/python manage.py migrate
 venv/bin/python manage.py seed_demo  # optional demo data + admin/admin12345
-venv/bin/python manage.py runserver  # http://127.0.0.1:8000
+venv/bin/python manage.py runserver 8290  # http://127.0.0.1:8290
 ```
 
 Run the automation engine in a second terminal:
@@ -67,7 +67,7 @@ venv/bin/python manage.py run_engine        # loops on the configured poll inter
 ```bash
 cd frontend
 npm install
-npm run dev                          # http://localhost:5173
+npm run dev                          # http://localhost:5290
 ```
 
 ## Configuration
@@ -77,12 +77,12 @@ Backend reads `backend/.env` (all optional in dev):
 ```
 DJANGO_SECRET_KEY=...
 MAIL_ENCRYPTION_KEY=<Fernet key>     # REQUIRED in production; keep it stable
-CORS_ALLOWED_ORIGINS=http://localhost:5173
+CORS_ALLOWED_ORIGINS=http://localhost:5290
 ```
 
 Generate a Fernet key: `venv/bin/python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`
 
-Frontend reads `VITE_API_BASE` (defaults to `http://127.0.0.1:8000/api`).
+Frontend reads `VITE_API_BASE` (defaults to `http://127.0.0.1:8290/api`).
 
 ## Layout
 

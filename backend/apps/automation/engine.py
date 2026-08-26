@@ -7,11 +7,13 @@ management command (or a cron/systemd timer).
 from __future__ import annotations
 
 import email
+import hashlib
 import imaplib
 import re
 import secrets
 import smtplib
 import string
+import uuid as uuid_mod
 from datetime import timedelta
 from email.header import decode_header, make_header
 from email.message import EmailMessage as PyEmailMessage
@@ -206,11 +208,172 @@ def _random_token(key: str):
     return "".join(secrets.choice(alphabet) for _ in range(length))
 
 
+# Date-offset placeholders: {{date_plus_3}} -> three days out, {{date_minus_1}} -> yesterday,
+# and {{business_day_plus_2}} which skips weekends — the usual shape of an SLA promise
+# ("we'll get back to you by ..."). Resolved at render time, like the random tokens.
+_DATE_OFFSET_KEY = re.compile(r"^(date|business_day)_(plus|minus)_(\d{1,4})$")
+_DATE_OFFSET_MAX_DAYS = 3650
+_LONG_DATE = "%A, %B %d, %Y"
+
+
+def _date_token(key: str):
+    """Return a formatted date for a date_plus_N / business_day_plus_N key, else None."""
+    m = _DATE_OFFSET_KEY.match(key)
+    if not m:
+        return None
+    kind, direction, raw = m.groups()
+    days = min(int(raw), _DATE_OFFSET_MAX_DAYS)
+    step = timedelta(days=1 if direction == "plus" else -1)
+    when = timezone.localtime()
+    if kind == "business_day":
+        # Step day by day and only count weekdays, so "2 business days" from a Friday
+        # lands on Tuesday instead of Sunday.
+        remaining = days
+        while remaining > 0:
+            when += step
+            if when.weekday() < 5:
+                remaining -= 1
+    else:
+        when += step * days
+    return when.strftime(_LONG_DATE)
+
+
+# normalize_subject() lowercases because it is a thread-matching key; a subject shown
+# back to the recipient must keep its original capitalisation, so strip prefixes here.
+_SUBJECT_PREFIX = re.compile(r"^\s*(re|fwd?|aw|sv)\s*(\[\d+\])?\s*:\s*", re.IGNORECASE)
+
+
+def _clean_subject(subject: str) -> str:
+    """'RE: Fwd: New warehouse build' -> 'New warehouse build' (case preserved)."""
+    subject = (subject or "").strip()
+    prev = None
+    while prev != subject:
+        prev = subject
+        subject = _SUBJECT_PREFIX.sub("", subject)
+    return re.sub(r"\s+", " ", subject).strip()
+
+
+def _split_email(addr: str) -> tuple[str, str]:
+    """'jane.doe@acme.com' -> ('jane.doe', 'acme.com'). Tolerant of blanks/garbage."""
+    local, _, domain = (addr or "").strip().partition("@")
+    return local, domain
+
+
+def _greeting(when) -> str:
+    hour = when.hour
+    if hour < 12:
+        return "Good morning"
+    if hour < 17:
+        return "Good afternoon"
+    return "Good evening"
+
+
+# A quoted original can be arbitrarily long; cap it so one huge thread can't bloat
+# every reply that quotes it.
+_QUOTE_MAX_CHARS = 5000
+
+
+def build_context(incoming: EmailMessage, mailbox: Mailbox, rule=None, template=None) -> dict:
+    """Every {{token}} the engine resolves when rendering a reply.
+
+    Single source of truth: the live send path calls this directly and the template
+    preview endpoint calls it via `sample_context`, so what a user previews is exactly
+    what goes out. Adding a token here makes it available in both.
+    """
+    now = timezone.localtime()
+    received = timezone.localtime(incoming.received_at) if incoming.received_at else now
+
+    sender_name = _sender_name(incoming)
+    first, _, last = sender_name.partition(" ")
+    sender_user, sender_domain = _split_email(incoming.from_addr)
+
+    mailbox_email = mailbox.email_address if mailbox else ""
+    _, mailbox_domain = _split_email(mailbox_email)
+
+    # An unsaved Mailbox (the preview path) has no workspace; don't trip on it.
+    workspace = mailbox.workspace if mailbox is not None and getattr(mailbox, "workspace_id", None) else None
+
+    body = incoming.body or ""
+    quoted = "\n".join("> " + line for line in body[:_QUOTE_MAX_CHARS].splitlines())
+
+    # Stable per-thread reference: same message always yields the same ticket id,
+    # so a retried or re-rendered reply doesn't invent a new one.
+    seed = incoming.message_id or f"msg-{incoming.pk}"
+    ticket_id = hashlib.sha1(seed.encode("utf-8", "replace")).hexdigest()[:8].upper()
+
+    return {
+        # --- Who wrote in --------------------------------------------------
+        "sender_name": sender_name,
+        "sender_first_name": first or sender_name,
+        "sender_last_name": last,
+        "sender_email": incoming.from_addr or "",
+        "sender_user": sender_user,
+        "sender_domain": sender_domain,
+        # --- Which mailbox is answering ------------------------------------
+        "mailbox_name": (mailbox.name if mailbox else ""),
+        "mailbox_email": mailbox_email,
+        "mailbox_domain": mailbox_domain,
+        "workspace_name": (workspace.name if workspace else ""),
+        # --- The message being answered ------------------------------------
+        "original_subject": incoming.subject or "",
+        "subject_clean": _clean_subject(incoming.subject),
+        "original_body": body[:_QUOTE_MAX_CHARS],
+        "quoted_body": quoted,
+        "message_id": incoming.message_id or "",
+        "ticket_id": ticket_id,
+        "received_date": received.strftime(_LONG_DATE),
+        "received_time": received.strftime("%I:%M %p").lstrip("0"),
+        # --- Right now -----------------------------------------------------
+        "date": now.strftime(_LONG_DATE),
+        "date_short": now.strftime("%Y-%m-%d"),
+        "date_us": now.strftime("%m/%d/%Y"),
+        "date_eu": now.strftime("%d/%m/%Y"),
+        "time": now.strftime("%I:%M %p").lstrip("0"),
+        "time_24": now.strftime("%H:%M"),
+        "datetime": now.strftime(f"{_LONG_DATE} at %I:%M %p").replace(" at 0", " at "),
+        "day": now.strftime("%d"),
+        "day_name": now.strftime("%A"),
+        "month": now.strftime("%m"),
+        "month_name": now.strftime("%B"),
+        "year": now.strftime("%Y"),
+        "timezone": now.tzname() or "",
+        "greeting": _greeting(now),
+        # --- Which automation fired ----------------------------------------
+        "rule_name": (rule.name if rule else ""),
+        "template_name": (template.name if template else ""),
+        # --- One-off identifier --------------------------------------------
+        "uuid": str(uuid_mod.uuid4()),
+    }
+
+
+def sample_context() -> dict:
+    """Realistic stand-in values for the template preview endpoint.
+
+    Built from unsaved model instances through `build_context`, so preview can never
+    advertise a token the real send path doesn't resolve.
+    """
+    incoming = EmailMessage(
+        subject="Re: Project Inquiry: New warehouse build",
+        from_addr="jane.doe@example.com",
+        from_name="Jane Doe",
+        body="Hello,\n\nCould you send a quote for the new warehouse build?\n\nThanks,\nJane",
+        message_id="<sample-preview@example.com>",
+        received_at=timezone.now(),
+    )
+    mailbox = Mailbox(name="Sales inbox", email_address="sales@your-domain.com")
+    context = build_context(incoming, mailbox)
+    context["workspace_name"] = "Your workspace"
+    context["rule_name"] = "Project inquiries"
+    context["template_name"] = "Standard reply"
+    return context
+
+
 def render_template(text: str, context: dict, workspace=None) -> str:
     """Replace {{key}} tokens using dynamic context + the workspace's Placeholders.
 
-    Also supports {{ran_letter_N}} / ran_digit_N / ran_alnum_N / ran_hex_N etc.,
-    each resolved to a fresh random string of length N at render time.
+    Also supports the computed tokens resolved at render time:
+    {{ran_letter_N}} / ran_digit_N / ran_alnum_N / ran_hex_N (fresh random strings),
+    and {{date_plus_N}} / {{date_minus_N}} / {{business_day_plus_N}} (offset dates).
     """
     values = dict(context)
     placeholders = Placeholder.objects.filter(workspace=workspace) if workspace else Placeholder.objects.none()
@@ -220,6 +383,8 @@ def render_template(text: str, context: dict, workspace=None) -> str:
     def repl(match: re.Match) -> str:
         key = match.group(1).strip()
         token = _random_token(key)
+        if token is None:
+            token = _date_token(key)
         if token is not None:
             return token
         return str(values.get(key, match.group(0)))
@@ -538,13 +703,7 @@ def _maybe_schedule_reply(mailbox: Mailbox, incoming: EmailMessage, config: Conf
         template = rule.template
         if not template.is_active:
             continue
-        context = {
-            "sender_name": _sender_name(incoming),
-            "sender_email": incoming.from_addr,
-            "original_subject": incoming.subject,
-            "mailbox_name": mailbox.name,
-            "date": timezone.now().strftime("%A, %B %d, %Y"),
-        }
+        context = build_context(incoming, mailbox, rule=rule, template=template)
         subject = render_template(template.subject, context, workspace=mailbox.workspace)
         body = render_template(template.body, context, workspace=mailbox.workspace)
         if config.signature:

@@ -269,6 +269,63 @@ h1, h2, h3, h4 { margin: 0; font-weight: 650; letter-spacing: -0.01em; }
   font-family: ui-monospace, monospace; cursor: pointer;
 }
 .chip:hover { border-color: var(--brand); color: var(--text); }
+/* Tag-palette tooltips. The native title= attribute lags ~1s, ignores the theme and
+   can't wrap, so chips carrying data-tip render their own instead. Only chips with the
+   attribute are affected, so plain .chip uses elsewhere are untouched. */
+.chip[data-tip] { position: relative; }
+.chip[data-tip]::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 9px);
+  left: 0;
+  transform: translateY(3px);
+  z-index: 70;
+  width: max-content;
+  max-width: 236px;
+  padding: 8px 11px;
+  border-radius: 7px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  box-shadow: var(--shadow);
+  font-family: "Inter", system-ui, -apple-system, sans-serif;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.5;
+  letter-spacing: normal;
+  white-space: normal;
+  text-align: left;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.13s ease, transform 0.13s ease;
+}
+/* The modal scrolls, so a bubble running past its right edge would be clipped.
+   Chips without room to their right flip to right-anchored — see tipAlign() in
+   AutoReply.jsx, which measures the row before the tooltip is shown. */
+.chip[data-tip][data-tip-align="end"]::after { left: auto; right: 0; }
+
+/* Arrow, painted in the bubble's fill so the two read as one shape. It stays on the
+   chip's own centre regardless of which way the bubble is anchored. */
+.chip[data-tip]::before {
+  content: "";
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 50%;
+  margin-left: -5px;
+  transform: translateY(3px);
+  z-index: 71;
+  border: 5px solid transparent;
+  border-top-color: var(--bg-elevated);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.13s ease, transform 0.13s ease;
+}
+.chip[data-tip]:hover::after, .chip[data-tip]:hover::before,
+.chip[data-tip]:focus-visible::after, .chip[data-tip]:focus-visible::before {
+  opacity: 1;
+  transform: translateY(0);
+}
+.chip:focus-visible { outline: none; border-color: var(--brand); color: var(--brand); }
 .toast {
   position: fixed; bottom: 24px; right: 24px; z-index: 100;
   background: var(--surface); border: 1px solid var(--border-strong);

@@ -1,5 +1,5 @@
 // Thin fetch wrapper around the Django REST API.
-const BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8000/api";
+const BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8290/api";
 
 export const TOKEN_KEY = "auth_token";
 export const getToken = () => localStorage.getItem(TOKEN_KEY);
