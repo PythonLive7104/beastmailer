@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, setToken } from "../api";
-import { Field, Loader, useToast } from "../components/ui";
+import { Field, Loader, PageIntro, useToast } from "../components/ui";
 
 const LEVEL_BADGE = { info: "badge-received", success: "badge-sent", warning: "badge-scheduled", error: "badge-failed" };
 
@@ -44,6 +44,10 @@ export default function Security() {
 
   return (
     <div className="grid">
+      <PageIntro
+        id="security"
+        lead="A record of everything that has happened in your account — sign-ins, changes and errors — and where you change your password."
+      />
       <div className="grid cols-4">
         {cards.map((c) => (
           <div className="card stat-card" key={c.label}>

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import { Icon } from "../icons";
-import { Field, Loader, Switch, useToast } from "../components/ui";
+import { Field, Loader, PageIntro, Switch, useToast } from "../components/ui";
 
 export default function Telegram() {
   const [cfg, setCfg] = useState(null);
@@ -39,6 +39,7 @@ export default function Telegram() {
 
   return (
     <div className="grid" style={{ maxWidth: 680 }}>
+      <PageIntro id="telegram" lead="Optional. Sends you a Telegram message when mail arrives, when a reply goes out, or when something fails, so you do not have to keep this page open." />
       <div className="card card-pad">
         <div className="between" style={{ marginBottom: 18 }}>
           <div>

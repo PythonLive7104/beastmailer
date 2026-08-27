@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import { Icon } from "../icons";
-import { Field, Loader, Modal, Switch, useToast } from "../components/ui";
+import { Field, Loader, Modal, PageIntro, Switch, useToast } from "../components/ui";
 
 const BLANK = { key: "", label: "", description: "", static_value: "", is_dynamic: false };
 
@@ -34,8 +34,12 @@ export default function Placeholders() {
 
   return (
     <div className="grid">
+      <PageIntro
+        id="placeholders"
+        lead="Your own reusable snippets of text. Create one here and you can drop it into any reply or campaign by name — useful for anything you type often, like your address, opening hours or phone number. Change it here and it changes in every email that uses it."
+      />
       <div className="section-head">
-        <span className="page-sub">Use these as <code>{"{{key}}"}</code> inside reply templates</span>
+        <div className="spacer" />
         <button className="btn btn-primary" onClick={() => setEditing({ ...BLANK })}><Icon.plus /> New placeholder</button>
       </div>
 

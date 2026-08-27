@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { Icon } from "../icons";
-import { Loader, useToast } from "../components/ui";
+import { Loader, PageIntro, useToast } from "../components/ui";
 
 function humanSize(bytes) {
   if (!bytes) return "0 B";
@@ -44,8 +44,12 @@ export default function Attachments() {
 
   return (
     <div className="grid">
+      <PageIntro
+        id="attachments"
+        lead="Files that can be attached to automatic replies — a price list or a brochure, for example. Upload once here, then attach it to a rule."
+      />
       <div className="section-head">
-        <span className="page-sub">Files you can attach to auto-replies (set them per rule on the Rules page).</span>
+        <div className="spacer" />
         <button className="btn btn-primary" onClick={() => fileInput.current?.click()} disabled={uploading}>
           <Icon.plus /> {uploading ? "Uploading…" : "Upload file"}
         </button>

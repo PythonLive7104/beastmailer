@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import { Icon } from "../icons";
-import { Field, Loader, Modal, Switch, useToast } from "../components/ui";
+import { Field, Loader, Modal, PageIntro, Switch, useToast } from "../components/ui";
 
 // Mirrors build_context() in apps/automation/engine.py. Adding a tag there means
 // adding it here too, or the client never discovers it.
@@ -147,8 +147,17 @@ export default function AutoReply() {
 
   return (
     <div className="grid">
+      <PageIntro
+        id="autoreply"
+        lead="The ready-made replies this app sends. When someone emails you, it can answer automatically with one of these, day or night. The {{tags}} below the message box fill themselves in — {{sender_name}} becomes the name of whoever wrote to you."
+      steps={[
+        "Write a reply here and save it.",
+        "On the Rules page, say which incoming emails should get this reply.",
+        "Use Preview to see exactly what a real person would receive.",
+      ]}
+      />
       <div className="section-head">
-        <span className="page-sub">{rows.length} reply template{rows.length !== 1 ? "s" : ""}</span>
+        <div className="spacer" />
         <button className="btn btn-primary" onClick={() => setEditing({ ...BLANK })}><Icon.plus /> New template</button>
       </div>
 

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import { Icon } from "../icons";
-import { Field, Loader, Modal, Switch, useToast } from "../components/ui";
+import { Field, Loader, Modal, PageIntro, Switch, useToast } from "../components/ui";
 
 const MATCH_TYPES = [
   ["contains", "Subject contains"],
@@ -61,8 +61,17 @@ export default function Rules() {
 
   return (
     <div className="grid">
+      <PageIntro
+        id="rules"
+        lead="Decides which reply goes out. A rule reads the subject line of an incoming email, and if it matches, sends the reply you chose. Without a rule, a saved reply is never used."
+      steps={[
+        "Give the rule words to look for in the subject line, such as \u201cinvoice\u201d.",
+        "Choose which saved reply to send when it matches.",
+        "Use Test to paste a subject line and check which rule would answer it.",
+      ]}
+      />
       <div className="section-head">
-        <span className="page-sub">{rows.length} rule{rows.length !== 1 ? "s" : ""} · first match wins (by priority)</span>
+        <div className="spacer" />
         <button className="btn btn-primary" onClick={() => setEditing({ ...BLANK })}><Icon.plus /> New rule</button>
       </div>
 

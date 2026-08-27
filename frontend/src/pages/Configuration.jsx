@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
-import { Field, Loader, Switch, useToast } from "../components/ui";
+import { Field, Loader, PageIntro, Switch, useToast } from "../components/ui";
 
 export default function Configuration() {
   const [cfg, setCfg] = useState(null);
@@ -23,6 +23,7 @@ export default function Configuration() {
 
   return (
     <div className="grid" style={{ maxWidth: 680 }}>
+      <PageIntro id="configuration" lead="The overall settings for automatic replying — how often the app checks for new mail, how long it waits before answering, and the signature added to the bottom of every reply. Individual accounts can override the timings on the Mailboxes page." />
       <div className="card card-pad">
         <div className="between" style={{ marginBottom: 18 }}>
           <div>

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import { Icon } from "../icons";
-import { Field, Loader, Modal, Switch, useToast } from "../components/ui";
+import { Field, Loader, Modal, PageIntro, Switch, useToast } from "../components/ui";
 
 // Campaign-only tags. Everything the auto-reply palette offers still works here —
 // these are the ones that mean something to a bulk send.
@@ -131,10 +131,17 @@ export default function Campaigns() {
 
   return (
     <div className="grid">
+      <PageIntro
+        id="campaigns"
+        lead="Send one email to a whole list of people at once — a newsletter, an announcement or an offer. Write it once, choose who gets it, and the app sends it out gradually and tells you who opened it and who clicked."
+      steps={[
+        "Add the people you want to reach on the Audience page.",
+        "Set up at least one way to send on the Sending routes page.",
+        "Come back here, write your email, pick the list, and press Send.",
+      ]}
+      />
       <div className="section-head">
-        <span className="page-sub">
-          Bulk sends to your contact lists, paced across your sending routes.
-        </span>
+        <div className="spacer" />
         <button className="btn btn-primary" onClick={() => setEditing({ ...BLANK })}>
           <Icon.plus /> New campaign
         </button>

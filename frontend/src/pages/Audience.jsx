@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import { Icon } from "../icons";
-import { Field, Loader, Modal, useToast } from "../components/ui";
+import { Field, Loader, Modal, PageIntro, useToast } from "../components/ui";
 
 const BLANK_CONTACT = { email: "", first_name: "", last_name: "", company: "", status: "subscribed" };
 const STATUS_BADGE = {
@@ -106,11 +106,17 @@ export default function Audience() {
 
   return (
     <div className="grid">
+      <PageIntro
+        id="audience"
+        lead="The people your campaigns go to. Add them one by one, or paste in a spreadsheet to add hundreds at once. Anyone who unsubscribes stays on this page marked as such, so they are never emailed again by mistake."
+      steps={[
+        "Create a list — for example \u201cNewsletter subscribers\u201d.",
+        "Use Import CSV to paste contacts from a spreadsheet. It needs a column called email.",
+        "A campaign then sends to whichever list you choose.",
+      ]}
+      />
       <div className="section-head">
-        <span className="page-sub">
-          Contacts and the lists campaigns send to. Unsubscribed and bounced addresses stay on
-          file so a re-import can never bring them back.
-        </span>
+        <div className="spacer" />
         <div className="row" style={{ gap: 8 }}>
           <button className="btn" onClick={() => setImporting({ csv: "", list: "" })}>
             <Icon.plus /> Import CSV

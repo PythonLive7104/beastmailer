@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { api, SERVER_ORIGIN } from "../api";
 import { useAuth } from "../auth";
 import { Icon } from "../icons";
-import { Field, Loader, Modal, useToast } from "../components/ui";
+import { Field, Loader, Modal, PageIntro, useToast } from "../components/ui";
 
 const ROLE_BADGE = { owner: "badge-sent", admin: "badge-received", member: "badge-neutral" };
 
@@ -68,6 +68,7 @@ export default function Team() {
 
   return (
     <div className="grid" style={{ gap: 22 }}>
+      <PageIntro id="team" lead="The people who share this workspace with you. Everyone here sees the same mailboxes, replies and campaigns." />
       {/* Members of the current workspace */}
       <div className="card">
         <div className="card-pad between">

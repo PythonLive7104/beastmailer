@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import { Icon } from "../icons";
-import { Field, Loader, Modal, Switch, useToast } from "../components/ui";
+import { Field, Loader, Modal, PageIntro, Switch, useToast } from "../components/ui";
 
 const BLANK = {
   name: "", email_address: "", username: "",
@@ -130,8 +130,17 @@ export default function Mailboxes() {
 
   return (
     <div className="grid">
+      <PageIntro
+        id="mailboxes"
+        lead="The email accounts this app signs into on your behalf. It watches them for new mail and sends replies from them. Add each account once — both automatic replies and campaigns use the same accounts."
+      steps={[
+        "Add an account with its email address and password.",
+        "Press Test to confirm the details are right before relying on it.",
+        "Set a daily send limit so the app never pushes an account past what its provider allows.",
+      ]}
+      />
       <div className="section-head">
-        <span className="page-sub">{rows.length} mailbox{rows.length !== 1 ? "es" : ""} configured</span>
+        <div className="spacer" />
         <button className="btn btn-primary" onClick={() => setEditing({ ...BLANK })}><Icon.plus /> Add mailbox</button>
       </div>
 

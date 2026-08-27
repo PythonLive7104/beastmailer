@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import { Icon } from "../icons";
-import { Field, Loader, Modal, Switch, useToast } from "../components/ui";
+import { Field, Loader, Modal, PageIntro, Switch, useToast } from "../components/ui";
 
 const BLANK = { label: "", kind: "socks5", host: "", port: 1080, username: "", password: "", is_active: true };
 const KIND_LABEL = { socks5: "SOCKS5", socks4: "SOCKS4", http: "HTTP" };
@@ -49,10 +49,12 @@ export default function Proxies() {
 
   return (
     <div className="grid">
+      <PageIntro
+        id="proxies"
+        lead="Optional, and most people do not need it. Sends your email through different internet connections instead of all from one, which can help when sending large volumes."
+      />
       <div className="section-head">
-        <span className="page-sub">
-          Outgoing SMTP is routed through a random active proxy for any mailbox with “Use proxy” on.
-        </span>
+        <div className="spacer" />
         <button className="btn btn-primary" onClick={() => setEditing({ ...BLANK })}><Icon.plus /> Add proxy</button>
       </div>
 

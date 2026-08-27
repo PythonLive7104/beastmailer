@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { Icon } from "../icons";
-import { Loader, StatusBadge, useToast } from "../components/ui";
+import { Loader, PageIntro, StatusBadge, useToast } from "../components/ui";
 
 export default function Listeners() {
   const [mailboxes, setMailboxes] = useState(null);
@@ -25,6 +25,10 @@ export default function Listeners() {
 
   return (
     <div className="grid">
+      <PageIntro
+        id="listeners"
+        lead="A live view of the accounts being watched and the mail arriving right now. This is the page to open when you want to check everything is actually working."
+      />
       <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))" }}>
         {mailboxes.map((m) => (
           <div className="card card-pad" key={m.id}>

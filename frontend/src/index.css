@@ -173,6 +173,11 @@ h1, h2, h3, h4 { margin: 0; font-weight: 650; letter-spacing: -0.01em; }
   background: var(--surface); border: 1px solid var(--border);
   border-radius: 16px; box-shadow: var(--shadow-sm);
 }
+/* A table wider than its card scrolls inside the card at every width. Without
+   this the page itself scrolled sideways between 640px and ~1100px, where the
+   sidebar is still docked but the viewport can no longer fit 7-8 columns.
+   Stat cards opt out: they have a decorative flourish that overflows by design. */
+.card:not(.stat-card) { overflow-x: auto; }
 .card-pad { padding: 20px; }
 .grid { display: grid; gap: 18px; }
 .grid > * { min-width: 0; }
@@ -202,6 +207,40 @@ h1, h2, h3, h4 { margin: 0; font-weight: 650; letter-spacing: -0.01em; }
 }
 .hero-clock .time { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .hero-clock .date { opacity: 0.82; font-size: 12.5px; }
+
+/* ---------------- Page explainer ---------------- */
+/* Deliberately quiet: it must read as help, not as an alert competing with the
+   page's own content. Sits above the toolbar so it is the first thing read. */
+.page-intro {
+  position: relative;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--brand);
+  border-radius: 12px;
+  padding: 14px 108px 14px 16px;
+  margin-bottom: 16px;
+}
+.page-intro.is-closed { padding: 8px 108px 8px 16px; min-height: 38px; }
+.page-intro-lead { margin: 0; color: var(--text); font-size: 13.5px; line-height: 1.65; }
+.page-intro-steps {
+  margin: 10px 0 0; padding-left: 20px;
+  color: var(--text-muted); font-size: 13px; line-height: 1.7;
+}
+.page-intro-steps li { margin-bottom: 2px; }
+.page-intro-steps li::marker { color: var(--brand); font-weight: 600; }
+.page-intro-toggle {
+  position: absolute; top: 10px; right: 12px;
+  background: none; border: 1px solid var(--border); border-radius: 7px;
+  color: var(--text-muted); font-size: 11.5px; padding: 3px 9px; cursor: pointer;
+  font-family: inherit;
+}
+.page-intro-toggle:hover { color: var(--brand); border-color: var(--brand); }
+@media (max-width: 560px) {
+  /* The button would eat most of a narrow line, so let the text run full width
+     and drop the toggle below it. */
+  .page-intro, .page-intro.is-closed { padding: 12px 14px 40px; }
+  .page-intro-toggle { top: auto; bottom: 10px; right: auto; left: 14px; }
+}
 
 /* ---------------- Table ---------------- */
 .table { width: 100%; border-collapse: collapse; }
@@ -260,7 +299,20 @@ h1, h2, h3, h4 { margin: 0; font-weight: 650; letter-spacing: -0.01em; }
 /* ---------------- Misc ---------------- */
 .row { display: flex; align-items: center; gap: 12px; }
 .between { display: flex; align-items: center; justify-content: space-between; }
-.section-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+.section-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 16px;
+  /* Wraps at any width: the explanatory text beside the button is often a full
+     sentence, and squeezing it into a narrow column made it unreadable long
+     before a phone breakpoint would have rescued it. */
+  flex-wrap: wrap; gap: 12px;
+}
+.section-head > :first-child { flex: 1 1 380px; min-width: 0; }
+.section-head .btn, .section-head .row { flex-shrink: 0; }
+/* When the explainer above already describes the page, the toolbar holds nothing
+   but its buttons — close the gap so they sit with the content they act on
+   instead of floating in an empty band. */
+.section-head:has(> .spacer:first-child) { margin-top: -8px; margin-bottom: 4px; }
 .spacer { flex: 1; }
 .empty { text-align: center; padding: 48px 20px; color: var(--text-muted); }
 .chip {
@@ -446,6 +498,12 @@ h1, h2, h3, h4 { margin: 0; font-weight: 650; letter-spacing: -0.01em; }
   .cols-aside { grid-template-columns: 1fr; }
 }
 
+/* Side-by-side inputs stop being comfortable well before phone width, and the
+   modal they sit in is itself narrower than the page. */
+@media (max-width: 760px) {
+  .field-row { grid-template-columns: 1fr; }
+}
+
 /* Below 900px: the sidebar becomes an off-canvas drawer. */
 @media (max-width: 900px) {
   .app { grid-template-columns: 1fr; }
@@ -468,7 +526,6 @@ h1, h2, h3, h4 { margin: 0; font-weight: 650; letter-spacing: -0.01em; }
 /* Phones — single-column everything, tables scroll, chrome trimmed. */
 @media (max-width: 640px) {
   .cols-2, .cols-4, .cols-5 { grid-template-columns: 1fr; }
-  .field-row { grid-template-columns: 1fr; }
 
   .hero { flex-direction: column; align-items: flex-start; gap: 18px; padding: 24px; }
   .hero h2 { font-size: 22px; }
@@ -477,18 +534,26 @@ h1, h2, h3, h4 { margin: 0; font-weight: 650; letter-spacing: -0.01em; }
   .section-head { flex-wrap: wrap; gap: 10px; }
   .between { flex-wrap: wrap; gap: 10px; }
 
-  /* Wide tables scroll inside their card instead of overflowing the page.
-     Stat cards are excluded — they have an overflowing decorative flourish. */
-  .card:not(.stat-card) { overflow-x: auto; }
   .table { min-width: 520px; }
 
   .toast { left: 16px; right: 16px; bottom: 16px; max-width: none; }
   .modal-head, .modal-body { padding: 16px; }
   .modal-foot { padding: 14px 16px; }
+  /* Near-fullscreen sheet: campaign and mailbox forms are long, and a centred
+     card with margins loses too much of the little height a phone has. */
+  .modal, .modal-wide { max-width: none; width: 100%; max-height: 94vh; border-radius: 14px; }
+  .modal-foot .btn { flex: 1; justify-content: center; }
 
   /* Reclaim topbar space on the smallest screens. */
   .topbar .page-sub, .topbar .badge-live { display: none; }
   .page-title { font-size: 18px; }
+  /* The page title says where you are, so it keeps the room: the workspace name
+     truncates instead. Without this the switcher held its full width and the
+     title collapsed to a few letters. */
+  .topbar-lead { flex: 1 1 auto; }
+  .topbar-actions { min-width: 0; flex-shrink: 1; }
+  .ws-switcher { min-width: 0; }
+  .ws-name { max-width: 84px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 }
 
 @media (max-width: 860px) {

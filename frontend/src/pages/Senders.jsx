@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import { Icon } from "../icons";
-import { Field, Loader, Modal, Switch, useToast } from "../components/ui";
+import { Field, Loader, Modal, PageIntro, Switch, useToast } from "../components/ui";
 
 // What each provider needs from the user. `fields` drives which inputs the modal
 // shows, so adding a provider server-side needs one row here and nothing else.
@@ -103,12 +103,17 @@ export default function Senders() {
 
   return (
     <div className="grid">
+      <PageIntro
+        id="senders"
+        lead="The ways this app can send email for you. That is either one of your own email accounts, or an outside sending service such as Amazon SES or Mailgun. Adding more than one matters because every email account has a daily limit — when one runs out, the app automatically continues with another instead of stopping."
+      steps={[
+        "Your own email accounts are added under Sending \u2192 Mailboxes, then picked here.",
+        "An outside service is worth adding if you send to more than a few hundred people.",
+        "Mark a service as \u201coverflow\u201d and it is only used once your own accounts hit their daily limit.",
+      ]}
+      />
       <div className="section-head">
-        <span className="page-sub">
-          Where campaigns send from. Add several and the engine rotates between them, moving to
-          overflow routes as the others hit their daily caps. Mailboxes themselves are added
-          under <b>Sending → Mailboxes</b>; pick one here to use it as a route.
-        </span>
+        <div className="spacer" />
         <button className="btn btn-primary" onClick={() => setEditing({ ...BLANK })}>
           <Icon.plus /> New route
         </button>

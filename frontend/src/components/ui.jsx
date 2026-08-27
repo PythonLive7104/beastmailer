@@ -62,3 +62,45 @@ export function Field({ label, children }) {
     </div>
   );
 }
+
+/** Plain-language explainer shown at the top of a page.
+ *
+ * The app assumes a lot of email knowledge — "route", "overflow", "placeholder"
+ * mean nothing to someone who just wants their mail answered. This states, in
+ * ordinary words, what the page is for and what to do on it. Collapsed state is
+ * remembered per page so people who already know can put it away for good.
+ */
+export function PageIntro({ id, lead, steps }) {
+  const key = `intro:${id}`;
+  const [open, setOpen] = useState(() => {
+    // Storage can throw in private windows and preview frames; a failed read
+    // just means the explainer shows, which is the safe default.
+    try { return localStorage.getItem(key) !== "closed"; } catch { return true; }
+  });
+
+  const toggle = () => {
+    setOpen((wasOpen) => {
+      try { localStorage.setItem(key, wasOpen ? "closed" : "open"); } catch { /* not critical */ }
+      return !wasOpen;
+    });
+  };
+
+  return (
+    <div className={`page-intro ${open ? "" : "is-closed"}`}>
+      <button type="button" className="page-intro-toggle" onClick={toggle}
+        aria-expanded={open} title={open ? "Hide this explanation" : "What is this page for?"}>
+        {open ? "Hide" : "What is this page?"}
+      </button>
+      {open && (
+        <>
+          <p className="page-intro-lead">{lead}</p>
+          {steps?.length > 0 && (
+            <ol className="page-intro-steps">
+              {steps.map((s, i) => <li key={i}>{s}</li>)}
+            </ol>
+          )}
+        </>
+      )}
+    </div>
+  );
+}

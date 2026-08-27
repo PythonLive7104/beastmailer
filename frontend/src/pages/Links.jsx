@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, SERVER_ORIGIN } from "../api";
 import { Icon } from "../icons";
-import { Field, Loader, Modal, Switch, useToast } from "../components/ui";
+import { Field, Loader, Modal, PageIntro, Switch, useToast } from "../components/ui";
 
 const BLANK = { name: "", slug: "", url: "", description: "", is_active: true };
 
@@ -36,8 +36,12 @@ export default function Links() {
 
   return (
     <div className="grid">
+      <PageIntro
+        id="links"
+        lead="Web links you can put into your emails. The app counts how many people click each one, so you can see what people are actually interested in."
+      />
       <div className="section-head">
-        <span className="page-sub">Reusable links. Insert the tracked URL in templates to count clicks.</span>
+        <div className="spacer" />
         <button className="btn btn-primary" onClick={() => setEditing({ ...BLANK })}><Icon.plus /> New link</button>
       </div>
 
