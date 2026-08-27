@@ -114,10 +114,15 @@ class CampaignSerializer(serializers.ModelSerializer):
         read_only_fields = ["status", "started_at", "finished_at", "error", "created_at", "updated_at"]
 
     def get_stats(self, obj) -> dict:
+        # Reads the viewset's annotations when present; falls back to a single
+        # aggregate for the detail view and anywhere else this serializer is used.
         return obj.stats()
 
     def get_audience_size(self, obj) -> int:
         """How many contacts this campaign would send to if it started now."""
+        sizes = self.context.get("audience_sizes")
+        if sizes is not None:
+            return sizes.get(obj.id, 0)
         return (
             Contact.objects.filter(lists__in=obj.lists.all(), status=Contact.Status.SUBSCRIBED)
             .distinct()

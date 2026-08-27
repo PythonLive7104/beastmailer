@@ -214,8 +214,41 @@ class CampaignSenderViewSet(WorkspaceScopedMixin, viewsets.ModelViewSet):
 
 
 class CampaignViewSet(WorkspaceScopedMixin, viewsets.ModelViewSet):
-    queryset = Campaign.objects.prefetch_related("lists", "senders").all()
+    queryset = Campaign.objects.prefetch_related("lists", "senders", "attachments").all()
     serializer_class = CampaignSerializer
+
+    def get_queryset(self):
+        """Annotate the report figures so a page of campaigns costs one query.
+
+        Previously the serializer called stats() and audience_size() per row — seven
+        queries per campaign, so a workspace with 50 campaigns issued 350 of them
+        just to draw the list.
+
+        The two annotations are deliberately NOT combined: `recipients` and
+        `lists__contacts` are separate joins, and aggregating both in one query
+        multiplies the rows and silently inflates every count.
+        """
+        qs = super().get_queryset()
+        stats = {f"_stat_{name}": expr for name, expr in Campaign.stats_aggregates().items()}
+        qs = qs.annotate(**stats)
+        return qs
+
+    def get_serializer_context(self):
+        """Audience sizes for the whole page in one query, keyed by campaign id."""
+        ctx = super().get_serializer_context()
+        if getattr(self, "action", None) == "list":
+            ids = list(self.filter_queryset(self.get_queryset()).values_list("id", flat=True))
+            rows = (
+                Campaign.objects.filter(id__in=ids)
+                .annotate(n=models.Count(
+                    "lists__contacts",
+                    filter=models.Q(lists__contacts__status=Contact.Status.SUBSCRIBED),
+                    distinct=True,
+                ))
+                .values_list("id", "n")
+            )
+            ctx["audience_sizes"] = dict(rows)
+        return ctx
 
     @action(detail=True, methods=["post"])
     def start(self, request, pk=None):

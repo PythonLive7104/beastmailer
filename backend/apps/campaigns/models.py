@@ -361,26 +361,44 @@ class Campaign(models.Model):
     def __str__(self):
         return self.name
 
-    def stats(self) -> dict:
-        """Counts for the campaign report, in one query per bucket."""
-        rows = self.recipients.values("status").annotate(n=models.Count("id"))
-        by_status = {r["status"]: r["n"] for r in rows}
-        total = sum(by_status.values())
-        sent = self.recipients.filter(
-            status__in=[CampaignRecipient.Status.SENT, CampaignRecipient.Status.OPENED,
-                        CampaignRecipient.Status.CLICKED]
-        ).count()
+    # Every bucket of the report expressed as a filtered COUNT, so the whole thing
+    # is one aggregate rather than a query per number. STATS_AGGREGATES is reused by
+    # the list endpoint to compute every campaign's figures in a single query.
+    @staticmethod
+    def stats_aggregates() -> dict:
+        R = CampaignRecipient
+        sent_states = [R.Status.SENT, R.Status.OPENED, R.Status.CLICKED]
+        count = models.Count
+        Q = models.Q
         return {
-            "total": total,
-            "pending": by_status.get(CampaignRecipient.Status.PENDING, 0),
-            "sent": sent,
-            "opened": self.recipients.filter(opened_at__isnull=False).count(),
-            "clicked": self.recipients.filter(clicked_at__isnull=False).count(),
-            "unsubscribed": self.recipients.filter(unsubscribed_at__isnull=False).count(),
-            "bounced": by_status.get(CampaignRecipient.Status.BOUNCED, 0),
-            "failed": by_status.get(CampaignRecipient.Status.FAILED, 0),
-            "skipped": by_status.get(CampaignRecipient.Status.SKIPPED, 0),
+            "total": count("recipients"),
+            "pending": count("recipients", filter=Q(recipients__status=R.Status.PENDING)),
+            "sent": count("recipients", filter=Q(recipients__status__in=sent_states)),
+            "opened": count("recipients", filter=Q(recipients__opened_at__isnull=False)),
+            "clicked": count("recipients", filter=Q(recipients__clicked_at__isnull=False)),
+            "unsubscribed": count("recipients", filter=Q(recipients__unsubscribed_at__isnull=False)),
+            "bounced": count("recipients", filter=Q(recipients__status=R.Status.BOUNCED)),
+            "failed": count("recipients", filter=Q(recipients__status=R.Status.FAILED)),
+            "skipped": count("recipients", filter=Q(recipients__status=R.Status.SKIPPED)),
         }
+
+    STATS_KEYS = ("total", "pending", "sent", "opened", "clicked",
+                  "unsubscribed", "bounced", "failed", "skipped")
+
+    def stats(self) -> dict:
+        """Counts for the campaign report.
+
+        One aggregate query. The list endpoint annotates these onto the queryset
+        instead, so a page of campaigns costs one query rather than one per row —
+        this method is the single-campaign path (the runner, the detail view).
+        """
+        # Already annotated by the viewset? Use that and issue nothing.
+        if hasattr(self, "_stat_total"):
+            return {k: getattr(self, f"_stat_{k}", 0) for k in self.STATS_KEYS}
+        return (
+            Campaign.objects.filter(pk=self.pk)
+            .aggregate(**self.stats_aggregates())
+        )
 
 
 class CampaignRecipient(models.Model):
