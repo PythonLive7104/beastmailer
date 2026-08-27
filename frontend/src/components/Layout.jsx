@@ -8,10 +8,27 @@ import OnboardingGuide from "./OnboardingGuide";
 
 const NAV = [
   { section: "Main", items: [["/", "Dashboard", "dashboard", true]] },
+  // Sending infrastructure sits above both features because both depend on it:
+  // a mailbox polls for auto-reply *and* sends campaigns, and a sending route
+  // carries campaigns *and* auto-reply overflow. Filing either under one feature
+  // would misrepresent what it belongs to.
+  {
+    section: "Sending",
+    items: [
+      ["/mailboxes", "Mailboxes", "mailbox"],
+      ["/senders", "Sending routes", "tower"],
+    ],
+  },
+  {
+    section: "Campaigns",
+    items: [
+      ["/campaigns", "Campaigns", "megaphone"],
+      ["/audience", "Audience", "audience"],
+    ],
+  },
   {
     section: "Automation",
     items: [
-      ["/mailboxes", "Mailbox", "mailbox"],
       ["/auto-reply", "Auto-reply", "reply"],
       ["/rules", "Rules", "rules"],
       ["/configuration", "Configuration", "config"],
@@ -41,7 +58,10 @@ const NAV = [
 
 const TITLES = {
   "/": ["Dashboard", "Live system overview"],
-  "/mailboxes": ["Mailboxes", "Connect and manage email accounts"],
+  "/campaigns": ["Campaigns", "Bulk email campaigns & reports"],
+  "/audience": ["Audience", "Contacts and mailing lists"],
+  "/senders": ["Sending routes", "External providers used for campaigns and reply overflow"],
+  "/mailboxes": ["Mailboxes", "Email accounts used for auto-reply and campaigns"],
   "/auto-reply": ["Auto-reply", "Saved reply templates"],
   "/rules": ["Rules", "Subject-based matching rules"],
   "/configuration": ["Configuration", "Automation engine settings"],

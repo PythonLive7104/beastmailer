@@ -4,6 +4,9 @@ import Layout from "./components/Layout";
 import { Loader } from "./components/ui";
 import Auth from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
+import Campaigns from "./pages/Campaigns";
+import Audience from "./pages/Audience";
+import Senders from "./pages/Senders";
 import Mailboxes from "./pages/Mailboxes";
 import AutoReply from "./pages/AutoReply";
 import Rules from "./pages/Rules";
@@ -41,6 +44,9 @@ export default function App() {
         <Route path="/signup" element={<PublicOnly><Auth mode="signup" /></PublicOnly>} />
         <Route element={<Protected><Layout /></Protected>}>
           <Route index element={<Dashboard />} />
+          <Route path="campaigns" element={<Campaigns />} />
+          <Route path="audience" element={<Audience />} />
+          <Route path="senders" element={<Senders />} />
           <Route path="mailboxes" element={<Mailboxes />} />
           <Route path="auto-reply" element={<AutoReply />} />
           <Route path="rules" element={<Rules />} />

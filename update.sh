@@ -35,7 +35,8 @@ fi
 set -a; . ./.env; set +a
 
 for var in POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD DATABASE_URL \
-           DJANGO_SECRET_KEY DJANGO_ALLOWED_HOSTS MAIL_ENCRYPTION_KEY; do
+           DJANGO_SECRET_KEY DJANGO_ALLOWED_HOSTS MAIL_ENCRYPTION_KEY \
+           PUBLIC_BASE_URL; do
   value="${!var:-}"
   [ -n "$value" ] || fail "$var is empty in .env"
   case "$value" in
@@ -50,6 +51,15 @@ case "$DATABASE_URL" in
 esac
 
 [ "${DJANGO_DEBUG:-0}" = "0" ] || fail "DJANGO_DEBUG must be 0 in production."
+
+# Campaign email embeds this origin in every tracking and unsubscribe link, so a
+# localhost value ships dead links to every recipient.
+case "$PUBLIC_BASE_URL" in
+  http://localhost*|http://127.0.0.1*|*your-domain.com*)
+    fail "PUBLIC_BASE_URL is still a placeholder ($PUBLIC_BASE_URL). Set it to your real public URL." ;;
+  https://*|http://*) ;;
+  *) fail "PUBLIC_BASE_URL must include a scheme, e.g. https://your-domain.com" ;;
+esac
 
 # --- Pull latest code -----------------------------------------------------
 if [ -d .git ]; then

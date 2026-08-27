@@ -122,6 +122,47 @@ export const api = {
     remove: (id) => request(`/attachments/${id}/`, { method: "DELETE" }),
   },
 
+  // --- Campaigns ------------------------------------------------------------
+  campaigns: {
+    list: () => request("/campaigns/").then(list),
+    get: (id) => request(`/campaigns/${id}/`),
+    create: (body) => request("/campaigns/", { method: "POST", body }),
+    update: (id, body) => request(`/campaigns/${id}/`, { method: "PATCH", body }),
+    remove: (id) => request(`/campaigns/${id}/`, { method: "DELETE" }),
+    start: (id) => request(`/campaigns/${id}/start/`, { method: "POST" }),
+    pause: (id) => request(`/campaigns/${id}/pause/`, { method: "POST" }),
+    resume: (id) => request(`/campaigns/${id}/resume/`, { method: "POST" }),
+    sendNow: (id) => request(`/campaigns/${id}/send_now/`, { method: "POST" }),
+    testSend: (id, to) => request(`/campaigns/${id}/test_send/`, { method: "POST", body: { to } }),
+    preview: (id) => request(`/campaigns/${id}/preview/`, { method: "POST" }),
+    recipients: (id, params) => request(`/campaigns/${id}/recipients/`, { params }),
+  },
+
+  contacts: {
+    list: (params) => request("/contacts/", { params }).then(list),
+    create: (body) => request("/contacts/", { method: "POST", body }),
+    update: (id, body) => request(`/contacts/${id}/`, { method: "PATCH", body }),
+    remove: (id) => request(`/contacts/${id}/`, { method: "DELETE" }),
+    importCsv: (body) => request("/contacts/import_csv/", { method: "POST", body }),
+    bulk: (body) => request("/contacts/bulk/", { method: "POST", body }),
+  },
+
+  contactLists: {
+    list: () => request("/contact-lists/").then(list),
+    create: (body) => request("/contact-lists/", { method: "POST", body }),
+    update: (id, body) => request(`/contact-lists/${id}/`, { method: "PATCH", body }),
+    remove: (id) => request(`/contact-lists/${id}/`, { method: "DELETE" }),
+  },
+
+  senders: {
+    list: () => request("/senders/").then(list),
+    create: (body) => request("/senders/", { method: "POST", body }),
+    update: (id, body) => request(`/senders/${id}/`, { method: "PATCH", body }),
+    remove: (id) => request(`/senders/${id}/`, { method: "DELETE" }),
+    test: (id, to) => request(`/senders/${id}/test/`, { method: "POST", body: { to } }),
+    capacity: () => request("/senders/capacity/"),
+  },
+
   proxies: {
     list: () => request("/proxies/").then(list),
     create: (body) => request("/proxies/", { method: "POST", body }),

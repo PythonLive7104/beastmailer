@@ -15,6 +15,13 @@ from apps.accounts.views import (
 )
 from apps.attachments.views import AttachmentViewSet
 from apps.billing.views import billing
+from apps.campaigns.tracking import track_click, track_open, unsubscribe
+from apps.campaigns.views import (
+    CampaignSenderViewSet,
+    CampaignViewSet,
+    ContactListViewSet,
+    ContactViewSet,
+)
 from apps.automation.views import ConfigViewSet, run_engine_now
 from apps.core.views import dashboard
 from apps.links.views import LinkViewSet, redirect_link
@@ -35,6 +42,10 @@ router.register("messages", EmailMessageViewSet, basename="messages")
 router.register("links", LinkViewSet)
 router.register("attachments", AttachmentViewSet)
 router.register("proxies", ProxyViewSet)
+router.register("campaigns", CampaignViewSet)
+router.register("contacts", ContactViewSet)
+router.register("contact-lists", ContactListViewSet)
+router.register("senders", CampaignSenderViewSet)
 router.register("events", SystemEventViewSet)
 router.register("workspaces", WorkspaceViewSet, basename="workspaces")
 
@@ -60,6 +71,11 @@ urlpatterns = [
     path("api/security/change-password/", change_password),
     path("api/invitations/accept/", accept_invitation),
     path("r/<slug:slug>/", redirect_link),
+    # Campaign tracking. Public by design — these are opened from inside a delivered
+    # email, so they authenticate with an unguessable token, not a session.
+    path("t/o/<str:token>.png", track_open),
+    path("t/c/<str:token>/", track_click),
+    path("t/u/<str:token>/", unsubscribe),
 ]
 
 if settings.DEBUG:

@@ -269,6 +269,13 @@ h1, h2, h3, h4 { margin: 0; font-weight: 650; letter-spacing: -0.01em; }
   font-family: ui-monospace, monospace; cursor: pointer;
 }
 .chip:hover { border-color: var(--brand); color: var(--text); }
+/* A chip used as a toggle (campaign list / route pickers) rather than a one-shot
+   insert button: the selected state has to survive hover, so it sets its own colours. */
+.chip-on, .chip-on:hover {
+  background: color-mix(in srgb, var(--brand) 18%, transparent);
+  border-color: var(--brand);
+  color: var(--brand);
+}
 /* Tag-palette tooltips. The native title= attribute lags ~1s, ignores the theme and
    can't wrap, so chips carrying data-tip render their own instead. Only chips with the
    attribute are affected, so plain .chip uses elsewhere are untouched. */

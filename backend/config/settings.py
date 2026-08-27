@@ -39,6 +39,7 @@ INSTALLED_APPS = [
     "apps.notifications",
     "apps.security",
     "apps.billing",
+    "apps.campaigns",
 ]
 
 MIDDLEWARE = [
@@ -142,6 +143,11 @@ REST_FRAMEWORK = {
 }
 
 # During dev, allow the Vite frontend to call the API.
+# Public origin used to build tracking URLs (open pixel, click redirect,
+# unsubscribe) from inside the engine, which has no request to derive them from.
+# Must be the address recipients can actually reach, e.g. https://your-domain.com.
+PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://localhost:5290")
+
 CORS_ALLOW_ALL_ORIGINS = DEBUG
 CORS_ALLOWED_ORIGINS = os.getenv(
     "CORS_ALLOWED_ORIGINS", "http://localhost:5290,http://127.0.0.1:5290"

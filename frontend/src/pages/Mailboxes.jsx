@@ -10,6 +10,7 @@ const BLANK = {
   password: "", is_active: true, use_proxy: false,
   scan_spam: true, extra_folders: "",
   poll_interval_seconds: 10, reply_delay_minutes: 10,
+  daily_send_limit: 0,
 };
 
 // Connection presets keyed by provider. `match` autodetects from the email domain;
@@ -299,6 +300,26 @@ function MailboxForm({ value, onChange }) {
       <div className="hint-inline" style={{ marginBottom: 14 }}>
         Leave either blank to follow the workspace defaults on the Configuration page.
         Polling faster than 30s on Gmail or Outlook risks rate-limiting.
+      </div>
+
+      <div className="field-row">
+        <Field label="Daily send limit (0 = no limit)">
+          <input className="input" type="number" min="0"
+            value={value.daily_send_limit ?? 0} onChange={setNum("daily_send_limit")} />
+        </Field>
+        <Field label="Sent today">
+          <input className="input" value={
+            value.remaining_sends_today == null
+              ? `${value.sent_today ?? 0} (uncapped)`
+              : `${value.sent_today ?? 0} · ${value.remaining_sends_today} left`
+          } readOnly />
+        </Field>
+      </div>
+      <div className="hint-inline" style={{ marginBottom: 14 }}>
+        Once this account reaches its cap, auto-replies are sent through any route on the
+        <b> Sending routes</b> page marked "use for auto-replies" instead of pushing the
+        account past a limit that gets it throttled. Gmail allows roughly 500/day on a
+        consumer account and 2,000 on Workspace.
       </div>
 
       <div className="row"><Switch checked={value.is_active} onChange={(v) => onChange({ ...value, is_active: v })} /><span className="page-sub">Active — include in polling</span></div>

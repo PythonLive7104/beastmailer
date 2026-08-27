@@ -25,6 +25,7 @@ class Command(BaseCommand):
                 self.style.SUCCESS(
                     f"tick: polled={stats['polled']} skipped={stats['skipped']} "
                     f"ingested={stats['ingested']} sent={stats['sent']} "
+                    f"campaign_sent={stats.get('campaign_sent', 0)} "
                     f"errors={len(stats['errors'])}"
                 )
             )

@@ -782,6 +782,12 @@ def send_due_replies(workspace=None) -> int:
         # leave the reply scheduled — it goes out once they pay, nothing is lost.
         if not workspace_can_send(message.workspace):
             continue
+        # Mailbox out of daily quota and nothing to fall back to: leave the reply
+        # scheduled rather than spending its retries. The cap resets at midnight and
+        # it goes out then — the same "pause, don't lose" rule as the paywall.
+        if (not message.mailbox.has_send_quota()
+                and _reply_fallback_route(message.workspace, message.mailbox) is None):
+            continue
 
         try:
             _send_message(message)
@@ -824,8 +830,123 @@ def send_due_replies(workspace=None) -> int:
     return sent
 
 
+def _reply_fallback_route(workspace, mailbox=None):
+    """A campaign route allowed to carry auto-replies for `mailbox`, or None.
+
+    A fallback reply keeps the mailbox's own From address, so a route may only be
+    used when it is authorised to send for that address's domain — otherwise the
+    reply fails SPF/DKIM and lands in spam. `can_send_as` is the gate; without it a
+    route verified for one domain would happily be used for another.
+
+    Among eligible routes, the one with fewest sends today wins, so several
+    fallbacks share the load rather than one absorbing everything.
+    """
+    from apps.campaigns.models import CampaignSender
+
+    candidates = CampaignSender.objects.filter(
+        workspace=workspace, is_active=True, use_for_replies=True
+    ).exclude(kind=CampaignSender.Kind.MAILBOX)
+
+    routes = []
+    for route in candidates:
+        if not route.has_quota():
+            continue
+        if mailbox is not None:
+            allowed, _reason = route.can_send_as(mailbox.email_address)
+            if not allowed:
+                continue
+        routes.append(route)
+    if not routes:
+        return None
+    return min(routes, key=lambda r: r.sent_today / max(1, r.weight))
+
+
+def _fallback_block_reason(workspace, mailbox) -> str:
+    """Why no route can carry this mailbox's replies — for the log and the UI."""
+    from apps.campaigns.models import CampaignSender
+
+    candidates = list(
+        CampaignSender.objects.filter(
+            workspace=workspace, is_active=True, use_for_replies=True
+        ).exclude(kind=CampaignSender.Kind.MAILBOX)
+    )
+    if not candidates:
+        return "no fallback sending route is enabled"
+    reasons = []
+    for route in candidates:
+        if not route.has_quota():
+            reasons.append(f"{route.name}: out of quota today")
+            continue
+        allowed, reason = route.can_send_as(mailbox.email_address)
+        if not allowed:
+            reasons.append(f"{route.name}: {reason}")
+    return "; ".join(reasons) or "no eligible route"
+
+
+def _send_via_fallback(message: EmailMessage, route) -> None:
+    """Send a reply through an external route, keeping the mailbox's own identity.
+
+    The From address stays the mailbox's, so the thread still looks like it came
+    from the person the sender wrote to — which also means the provider must be
+    authorised for that domain (SPF/DKIM), or the reply lands in spam.
+    """
+    from apps.campaigns.models import Contact
+    from apps.campaigns.sending import deliver
+
+    from apps.campaigns.models import CampaignSender
+
+    mailbox = message.mailbox
+    headers = {"Auto-Submitted": "auto-replied"}
+    if message.reply_to_message and message.reply_to_message.message_id:
+        headers["In-Reply-To"] = message.reply_to_message.message_id
+        headers["References"] = message.reply_to_message.message_id
+
+    # Under ROUTE identity the mail goes out as the provider's own verified address
+    # and the mailbox becomes Reply-To, so replies still come back to the right place.
+    if route.reply_identity == CampaignSender.ReplyIdentity.ROUTE:
+        from_override = ""
+        headers["Reply-To"] = mailbox.email_address
+    else:
+        from_override = mailbox.email_address
+
+    # deliver() addresses a Contact; an unsaved one carries the recipient without
+    # adding this person to the campaign audience.
+    allowed, reason = route.can_send_as(mailbox.email_address)
+    if not allowed:
+        # Selection already filtered on this; re-checked here so a route edited
+        # mid-flight can never slip an unauthenticated reply out.
+        raise RuntimeError(f"Route '{route.name}' cannot send as {mailbox.email_address}: {reason}")
+
+    recipient = Contact(email=message.to_addr, unsubscribe_token=f"reply-{message.pk}")
+    deliver(
+        route, recipient, message.subject, message.body, message.is_html,
+        list(message.attachments.all()),
+        from_override=from_override,
+        extra_headers=headers,
+    )
+    route.record_send()
+    SystemEvent.log(
+        "engine",
+        f"Mailbox {mailbox.name} is at its daily cap; reply to {message.to_addr} sent via {route.name}",
+        workspace=message.workspace,
+    )
+
+
 def _send_message(message: EmailMessage):
     mailbox = message.mailbox
+    # Mailbox out of daily quota? Borrow a fallback route rather than pushing the
+    # account past a limit that gets it throttled or suspended.
+    if not mailbox.has_send_quota():
+        route = _reply_fallback_route(message.workspace, mailbox)
+        if route is None:
+            raise RuntimeError(
+                f"Mailbox '{mailbox.name}' has hit its daily send limit "
+                f"({mailbox.daily_send_limit}) and no route can send as "
+                f"{mailbox.email_address} — {_fallback_block_reason(message.workspace, mailbox)}."
+            )
+        _send_via_fallback(message, route)
+        return
+
     py = PyEmailMessage()
     py["From"] = mailbox.email_address
     py["To"] = message.to_addr
@@ -859,10 +980,12 @@ def _send_message(message: EmailMessage):
         smtp.send_message(py)
     finally:
         smtp.quit()
+    # Only a delivered message counts against the cap; a failed attempt will retry.
+    mailbox.record_send()
 
 
 def run_once(workspace=None, force=False) -> dict:
-    """One full engine tick: poll due mailboxes, then send due replies.
+    """One full engine tick: poll due mailboxes, send due replies, run campaigns.
 
     Pass ``workspace`` to restrict the tick to a single workspace (the on-demand run
     from the dashboard); the looping ``run_engine`` command leaves it ``None`` to
@@ -890,4 +1013,10 @@ def run_once(workspace=None, force=False) -> dict:
             notify(mailbox.workspace, "error", f"⚠️ Mailbox <b>{mailbox.name}</b> poll error: {exc}")
             SystemEvent.log("mailbox", f"Poll error on {mailbox.name}: {exc}", "error", workspace=mailbox.workspace)
     stats["sent"] = send_due_replies(workspace=workspace)
+    # Campaigns ride the same tick as auto-replies, so bulk sending needs no second
+    # process. Imported here rather than at module scope: apps.campaigns imports the
+    # engine for its renderer, and a top-level import would close that circle.
+    from apps.campaigns.runner import run_campaigns
+
+    stats["campaign_sent"] = run_campaigns(workspace=workspace)
     return stats

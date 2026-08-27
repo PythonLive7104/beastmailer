@@ -60,6 +60,17 @@ class Mailbox(models.Model):
     last_seen_uid = models.PositiveBigIntegerField(default=0)
     last_error = models.TextField(blank=True, default="")
 
+    # Outgoing volume cap. Consumer Gmail cuts off near 500/day and Workspace near
+    # 2000; exceeding it gets the account throttled or suspended, so the engine
+    # counts sends and diverts to a fallback route once the cap is reached.
+    # 0 = no cap, which is the pre-existing behaviour for mailboxes created before
+    # this field existed.
+    daily_send_limit = models.PositiveIntegerField(
+        default=0, help_text="Max emails per day from this account. 0 = no limit."
+    )
+    sent_today = models.PositiveIntegerField(default=0)
+    send_day_started = models.DateField(null=True, blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -82,3 +93,28 @@ class Mailbox(models.Model):
     @password.setter
     def password(self, value: str):
         self.password_encrypted = encrypt(value or "")
+
+    def roll_send_counter(self, now=None):
+        """Zero the daily counter when the date has moved on."""
+        from django.utils import timezone
+
+        today = timezone.localdate(now or timezone.now())
+        if self.send_day_started != today:
+            self.send_day_started = today
+            self.sent_today = 0
+            self.save(update_fields=["send_day_started", "sent_today"])
+
+    def has_send_quota(self, now=None) -> bool:
+        self.roll_send_counter(now)
+        return not self.daily_send_limit or self.sent_today < self.daily_send_limit
+
+    def record_send(self):
+        self.sent_today += 1
+        self.save(update_fields=["sent_today"])
+
+    def remaining_sends_today(self):
+        """Sends left today, or None when the mailbox is uncapped."""
+        if not self.daily_send_limit:
+            return None
+        self.roll_send_counter()
+        return max(0, self.daily_send_limit - self.sent_today)
