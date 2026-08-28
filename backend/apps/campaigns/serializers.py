@@ -30,6 +30,21 @@ class ContactListSerializer(serializers.ModelSerializer):
     def get_contact_count(self, obj) -> int:
         return obj.contacts.count()
 
+    def validate_name(self, value):
+        """Two lists with the same name are indistinguishable in every picker in the
+        app, so refuse the duplicate rather than letting people guess later."""
+        name = (value or "").strip()
+        qs = ContactList.objects.filter(name__iexact=name)
+        if self.instance is not None:
+            qs = qs.exclude(pk=self.instance.pk)
+            qs = qs.filter(workspace=self.instance.workspace)
+        else:
+            from apps.workspaces.services import active_workspace
+            qs = qs.filter(workspace=active_workspace(self.context["request"].user))
+        if qs.exists():
+            raise serializers.ValidationError(f"You already have a list called “{name}”.")
+        return name
+
 
 class CampaignSenderSerializer(serializers.ModelSerializer):
     # Write-only, like Mailbox.password: accepted on save, never echoed back.

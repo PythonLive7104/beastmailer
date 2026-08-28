@@ -56,12 +56,23 @@ export default function Audience() {
   const saveList = async () => {
     setBusy(true);
     try {
-      if (listEditing.id) await api.contactLists.update(listEditing.id, listEditing);
-      else await api.contactLists.create(listEditing);
-      toast("List saved");
+      const { emails, ...listFields } = listEditing;
+      const saved = listEditing.id
+        ? await api.contactLists.update(listEditing.id, listFields)
+        : await api.contactLists.create(listFields);
+
+      // Addresses typed here are imported straight onto the list just saved, so
+      // creating a list and filling it is one action rather than three.
+      let added = "";
+      if ((emails || "").trim()) {
+        const r = await api.contacts.importCsv({ csv: emails, list: saved.id });
+        added = ` — ${r.created} added, ${r.updated} already known`;
+      }
+      toast(`List saved${added}`);
       setListEditing(null);
       loadLists();
-    } catch (e) { toast(`Save failed: ${JSON.stringify(e.detail)}`, "err"); }
+      loadContacts();
+    } catch (e) { toast(`Save failed: ${e.detail?.detail || JSON.stringify(e.detail)}`, "err"); }
     finally { setBusy(false); }
   };
 
@@ -150,7 +161,7 @@ export default function Audience() {
           })}>
             <Icon.plus /> Import contacts
           </button>
-          <button className="btn" onClick={() => setListEditing({ name: "", description: "" })}>
+          <button className="btn" onClick={() => setListEditing({ name: "", description: "", emails: "" })}>
             <Icon.plus /> New list
           </button>
           <button className="btn btn-primary" onClick={() => setEditing({ ...BLANK_CONTACT })}>
@@ -167,14 +178,22 @@ export default function Audience() {
             {lists.map((l) => (
               <tr key={l.id}>
                 <td className="subj">{l.name}<div className="muted">{l.description}</div></td>
-                <td className="mono">{l.contact_count}</td>
+                <td className="mono">
+                  {l.contact_count}
+                  {l.contact_count === 0 && <div className="muted" style={{ fontSize: 11 }}>empty — add people</div>}
+                </td>
                 <td className="mono">{l.mailable_count}</td>
                 <td>
                   <div className="row" style={{ justifyContent: "flex-end", gap: 6 }}>
+                    {/* The obvious place to look when a list is sitting there empty. */}
+                    <button className="btn btn-sm" title="Add email addresses to this list"
+                      onClick={() => setImporting({ csv: "", list: String(l.id), list_name: "" })}>
+                      <Icon.plus /> Add people
+                    </button>
                     <button className="btn btn-sm btn-ghost" onClick={() => setFilter({ ...filter, list: String(l.id) })}>
                       View
                     </button>
-                    <button className="btn btn-sm btn-ghost" onClick={() => setListEditing({ ...l })}><Icon.edit /></button>
+                    <button className="btn btn-sm btn-ghost" onClick={() => setListEditing({ ...l, emails: "" })}><Icon.edit /></button>
                     <button className="btn btn-sm btn-danger" onClick={() => removeList(l)}><Icon.trash /></button>
                   </div>
                 </td>
@@ -353,6 +372,36 @@ export default function Audience() {
             <input className="input" value={listEditing.description || ""}
               onChange={(e) => setListEditing({ ...listEditing, description: e.target.value })} />
           </Field>
+          <Field label={listEditing.id ? "Add more email addresses (optional)" : "Email addresses (optional)"}>
+            <textarea className="textarea mono" style={{ minHeight: 150, width: "100%" }}
+              placeholder={"jane@example.com\nsam@acme.io\nlee@corp.com"}
+              value={listEditing.emails || ""}
+              onChange={(e) => setListEditing({ ...listEditing, emails: e.target.value })} />
+          </Field>
+          <div className="row" style={{ gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+            <label className="btn btn-sm" style={{ cursor: "pointer" }}>
+              Choose a file…
+              <input type="file" accept=".csv,.txt,text/csv,text/plain" style={{ display: "none" }}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  const reader = new FileReader();
+                  reader.onload = () => setListEditing((cur) => ({ ...cur, emails: String(reader.result || "") }));
+                  reader.onerror = () => toast("Could not read that file", "err");
+                  reader.readAsText(file);
+                  e.target.value = "";
+                }} />
+            </label>
+            {(listEditing.emails || "").includes("@") && (
+              <span className="page-sub">
+                {((listEditing.emails || "").match(/@/g) || []).length} address(es) detected
+              </span>
+            )}
+          </div>
+          <div className="hint-inline">
+            Leave this empty to create the list now and add people later. One address per line,
+            or separated by commas — a spreadsheet with an <code>email</code> column works too.
+          </div>
         </Modal>
       )}
 
