@@ -22,7 +22,7 @@ from django.utils import timezone
 
 from apps.automation.engine import _smtp_connect, build_context, html_to_text, render_template
 from apps.proxies.models import Proxy
-from apps.proxies.net import ProxySMTP, ProxySMTP_SSL
+from apps.proxies.net import smtp_connect
 
 from .models import Campaign, CampaignRecipient, CampaignSender, Contact
 
@@ -215,18 +215,12 @@ def _smtp_for(sender: CampaignSender):
     if sender.kind == CampaignSender.Kind.SES:
         # SES publishes one SMTP endpoint per region.
         host = host or f"email-smtp.{sender.region or 'us-east-1'}.amazonaws.com"
-    port = sender.smtp_port or 587
     proxy = Proxy.pick_random(sender.workspace) if sender.use_proxy else None
-    if sender.smtp_use_tls:
-        smtp = ProxySMTP(host, port, proxy=proxy, timeout=30)
-        smtp.starttls(context=ssl.create_default_context())
-    elif port == 465:
-        smtp = ProxySMTP_SSL(host, port, proxy=proxy, timeout=30)
-    else:
-        smtp = ProxySMTP(host, port, proxy=proxy, timeout=30)
-    if sender.username:
-        smtp.login(sender.username, sender.secret)
-    return smtp
+    # Shared with the auto-reply path so both agree on how 465 vs 587 is handled.
+    return smtp_connect(
+        host, sender.smtp_port or 587, sender.username, sender.secret,
+        use_tls=sender.smtp_use_tls, proxy=proxy, timeout=30,
+    )
 
 
 def _send_smtp(sender, contact, subject, body, is_html, attachments, from_override="", extra_headers=None):

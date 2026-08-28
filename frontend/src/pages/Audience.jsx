@@ -11,9 +11,9 @@ const STATUS_BADGE = {
   complained: "badge-failed",
 };
 
-const SAMPLE_CSV = `email,first name,last name,company
-jane@example.com,Jane,Doe,Example Ltd
-sam@acme.io,Sam,Reed,Acme`;
+const SAMPLE_PLAIN = `jane@example.com
+sam@acme.io
+lee@corp.com`;
 
 export default function Audience() {
   const [lists, setLists] = useState(null);
@@ -72,6 +72,16 @@ export default function Audience() {
     loadLists();
   };
 
+  const readFile = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => setImporting((cur) => ({ ...cur, csv: String(reader.result || "") }));
+    reader.onerror = () => toast("Could not read that file", "err");
+    reader.readAsText(file);
+    e.target.value = "";   // let the same file be picked again after an edit
+  };
+
   const runImport = async () => {
     setBusy(true);
     try {
@@ -111,7 +121,7 @@ export default function Audience() {
         lead="The people your campaigns go to. Add them one by one, or paste in a spreadsheet to add hundreds at once. Anyone who unsubscribes stays on this page marked as such, so they are never emailed again by mistake."
       steps={[
         "Create a list — for example \u201cNewsletter subscribers\u201d.",
-        "Use Import CSV to paste contacts from a spreadsheet. It needs a column called email.",
+        "Use Import CSV to paste your addresses \u2014 one per line is enough, or upload a file.",
         "A campaign then sends to whichever list you choose.",
       ]}
       />
@@ -119,7 +129,7 @@ export default function Audience() {
         <div className="spacer" />
         <div className="row" style={{ gap: 8 }}>
           <button className="btn" onClick={() => setImporting({ csv: "", list: "" })}>
-            <Icon.plus /> Import CSV
+            <Icon.plus /> Import contacts
           </button>
           <button className="btn" onClick={() => setListEditing({ name: "", description: "" })}>
             <Icon.plus /> New list
@@ -235,17 +245,40 @@ export default function Audience() {
               {lists.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
             </select>
           </Field>
-          <Field label="CSV — needs an 'email' column">
+          <Field label="Email addresses">
             <textarea className="textarea mono" style={{ minHeight: 220, width: "100%" }}
-              placeholder={SAMPLE_CSV} value={importing.csv}
+              placeholder={SAMPLE_PLAIN} value={importing.csv}
               onChange={(e) => setImporting({ ...importing, csv: e.target.value })} />
           </Field>
+          <div className="row" style={{ gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+            <label className="btn btn-sm" style={{ cursor: "pointer" }}>
+              Choose a file…
+              <input type="file" accept=".csv,.txt,text/csv,text/plain"
+                style={{ display: "none" }} onChange={readFile} />
+            </label>
+            <span className="page-sub">or paste the addresses above</span>
+            {importing.csv && (
+              <span className="page-sub" style={{ marginLeft: "auto" }}>
+                {(importing.csv.match(/@/g) || []).length} address(es) detected
+              </span>
+            )}
+          </div>
           <div className="hint-inline">
-            <code>email</code>, <code>first name</code>, <code>last name</code> and <code>company</code> map
-            to real fields. Any other column is kept and becomes its own template tag — a
-            column called <code>city</code> is usable as <code>{"{{city}}"}</code> in a campaign.
-            Re-importing an address updates it rather than duplicating, and never resubscribes
-            someone who opted out.
+            <b>Just addresses is fine.</b> Paste one per line, or separated by commas — that is
+            all you need for email marketing to a list of potential clients. Names copied from a
+            mail client, like <code>Jane Doe &lt;jane@example.com&gt;</code>, are understood too.
+            Duplicates and anything that is not an address are skipped automatically.
+          </div>
+          <div className="hint-inline">
+            <b>Got a spreadsheet with more detail?</b> Paste it with its header row and name the
+            address column <code>email</code>. <code>first name</code>, <code>last name</code> and{" "}
+            <code>company</code> are recognised; any other column is kept and becomes its own tag —
+            a column called <code>city</code> is then usable as <code>{"{{city}}"}</code> in a campaign.
+          </div>
+          <div className="hint-inline">
+            Re-importing an address updates it rather than duplicating it, and never resubscribes
+            someone who opted out. If you only have addresses, avoid <code>{"{{first_name}}"}</code> in
+            your campaign — it falls back to “there”.
           </div>
         </Modal>
       )}

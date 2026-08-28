@@ -52,6 +52,43 @@ const PRESETS = [
     note: "App-specific password required (appleid.apple.com → Sign-In & Security).",
   },
   {
+    id: "titan", label: "Titan Mail (Namecheap, Hostinger, GoDaddy)",
+    // Titan mailboxes use the customer's own domain, so there is nothing to
+    // autodetect from the address — it has to be picked from this list.
+    match: [],
+    imap_host: "imap.titan.email", imap_port: 993, imap_use_ssl: true,
+    smtp_host: "smtp.titan.email", smtp_port: 465, smtp_use_tls: true,
+    note: "Sign in with the full email address and its normal password. Titan uses port 465 (SSL) for sending.",
+  },
+  {
+    id: "privateemail", label: "Namecheap Private Email",
+    match: [],
+    imap_host: "mail.privateemail.com", imap_port: 993, imap_use_ssl: true,
+    smtp_host: "mail.privateemail.com", smtp_port: 465, smtp_use_tls: true,
+    note: "Same host for both IMAP and SMTP. Use the full email address as the username.",
+  },
+  {
+    id: "hostinger", label: "Hostinger Email",
+    match: [],
+    imap_host: "imap.hostinger.com", imap_port: 993, imap_use_ssl: true,
+    smtp_host: "smtp.hostinger.com", smtp_port: 465, smtp_use_tls: true,
+    note: "Use the full email address as the username, with the password you set in hPanel.",
+  },
+  {
+    id: "fastmail", label: "Fastmail",
+    match: ["fastmail.com", "fastmail.fm"],
+    imap_host: "imap.fastmail.com", imap_port: 993, imap_use_ssl: true,
+    smtp_host: "smtp.fastmail.com", smtp_port: 465, smtp_use_tls: true,
+    note: "App password required (Settings → Privacy & Security → App passwords).",
+  },
+  {
+    id: "cpanel", label: "cPanel / your own web host",
+    match: [],
+    imap_host: "mail.yourdomain.com", imap_port: 993, imap_use_ssl: true,
+    smtp_host: "mail.yourdomain.com", smtp_port: 465, smtp_use_tls: true,
+    note: "Replace yourdomain.com with your own domain. Most cPanel hosts use mail.<domain> for both, on 993 and 465.",
+  },
+  {
     id: "custom", label: "Other / custom (enter manually)",
     match: [],
     note: "Enter your provider's IMAP and SMTP settings. 993 = IMAP SSL; SMTP 587 = STARTTLS, 465 = SSL.",

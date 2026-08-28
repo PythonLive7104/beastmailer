@@ -67,17 +67,51 @@ class ProxySMTP_SSL(smtplib.SMTP_SSL):
         return super()._get_socket(host, port, timeout)
 
 
-def open_smtp(mailbox, proxy=None, timeout=30):
-    """Open an authenticated SMTP connection, optionally routed through `proxy`."""
-    if mailbox.smtp_use_tls:
-        smtp = ProxySMTP(mailbox.smtp_host, mailbox.smtp_port, proxy=proxy, timeout=timeout)
-        smtp.starttls(context=ssl.create_default_context())
-    elif mailbox.smtp_port == 465:
-        smtp = ProxySMTP_SSL(mailbox.smtp_host, mailbox.smtp_port, proxy=proxy, timeout=timeout)
+# Port 465 is "implicit TLS": the server begins the TLS handshake the moment the
+# socket opens. Port 587 (and 25) are "explicit TLS": you connect in the clear and
+# upgrade with STARTTLS. Using the wrong one does not fail cleanly — it hangs until
+# the timeout, because each side is waiting for the other to speak first.
+IMPLICIT_TLS_PORTS = {465}
+
+
+def smtp_connect(host, port, username="", password="", use_tls=True, proxy=None, timeout=30):
+    """Open an authenticated SMTP connection, choosing the right TLS mechanism.
+
+    The port decides the mechanism, not the caller's checkbox. Trusting the flag is
+    what broke every provider that uses 465 (Titan, Zoho, Fastmail, most cPanel
+    hosts): the form defaults the flag to on, so a 465 mailbox tried to STARTTLS
+    against a socket already expecting a TLS handshake and simply hung.
+    """
+    port = int(port or 587)
+    if port in IMPLICIT_TLS_PORTS:
+        smtp = ProxySMTP_SSL(host, port, proxy=proxy, timeout=timeout)
     else:
-        smtp = ProxySMTP(mailbox.smtp_host, mailbox.smtp_port, proxy=proxy, timeout=timeout)
-    smtp.login(mailbox.username, mailbox.password)
+        smtp = ProxySMTP(host, port, proxy=proxy, timeout=timeout)
+        smtp.ehlo()
+        if smtp.has_extn("starttls"):
+            # Upgrade whenever the server offers it, even if the flag was off:
+            # that only ever turns a plaintext login into an encrypted one.
+            smtp.starttls(context=ssl.create_default_context())
+            smtp.ehlo()
+        elif use_tls:
+            # Asked for encryption and the server cannot provide it. Better to stop
+            # than to send the password in the clear.
+            smtp.quit()
+            raise smtplib.SMTPException(
+                f"{host}:{port} does not offer STARTTLS. If this provider uses SSL, "
+                f"set the port to 465 instead."
+            )
+    if username:
+        smtp.login(username, password)
     return smtp
+
+
+def open_smtp(mailbox, proxy=None, timeout=30):
+    """Open an authenticated SMTP connection for a Mailbox."""
+    return smtp_connect(
+        mailbox.smtp_host, mailbox.smtp_port, mailbox.username, mailbox.password,
+        use_tls=mailbox.smtp_use_tls, proxy=proxy, timeout=timeout,
+    )
 
 
 def test_proxy(proxy, timeout=15) -> dict:

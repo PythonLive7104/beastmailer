@@ -12,6 +12,7 @@ import imaplib
 import re
 import secrets
 import smtplib
+import ssl
 import string
 import uuid as uuid_mod
 from datetime import timedelta
@@ -37,13 +38,52 @@ from apps.security.models import SystemEvent
 # --------------------------------------------------------------------------- #
 # Connection helpers
 # --------------------------------------------------------------------------- #
+# 993 is implicit TLS, 143 is plaintext-then-STARTTLS — the same split as SMTP's
+# 465/587, and the same hang if the two are mismatched.
+IMAP_IMPLICIT_TLS_PORTS = {993}
+
+
 def _imap_connect(mailbox: Mailbox) -> imaplib.IMAP4:
-    if mailbox.imap_use_ssl:
-        conn = imaplib.IMAP4_SSL(mailbox.imap_host, mailbox.imap_port)
+    port = int(mailbox.imap_port or 993)
+    # The port decides, not the checkbox: a 993 mailbox saved with SSL off used to
+    # open a plaintext socket against a TLS listener and stall until timeout.
+    if mailbox.imap_use_ssl or port in IMAP_IMPLICIT_TLS_PORTS:
+        conn = imaplib.IMAP4_SSL(mailbox.imap_host, port)
     else:
-        conn = imaplib.IMAP4(mailbox.imap_host, mailbox.imap_port)
+        conn = imaplib.IMAP4(mailbox.imap_host, port)
+        # Upgrade an explicit-TLS port when the server offers it, so a mailbox on
+        # 143 is not left sending its password in the clear.
+        if "STARTTLS" in conn.capabilities:
+            conn.starttls(ssl.create_default_context())
     conn.login(mailbox.username, mailbox.password)
     return conn
+
+
+def _diagnose(exc: Exception, host: str, port: int, kind: str) -> str:
+    """Turn a raw socket/protocol error into something a user can act on.
+
+    A wrong TLS port produces a bare timeout, which tells the user nothing — this
+    is where they get told to try the other port instead.
+    """
+    text = str(exc) or type(exc).__name__
+    low = text.lower()
+    ssl_ports = {"smtp": 465, "imap": 993}
+    tls_ports = {"smtp": 587, "imap": 143}
+    if "timed out" in low or "unexpectedly closed" in low or isinstance(exc, TimeoutError):
+        if port == tls_ports[kind]:
+            return (f"{text} — no reply from {host}:{port}. If your provider lists port "
+                    f"{ssl_ports[kind]} for {kind.upper()}, use that instead.")
+        return (f"{text} — no reply from {host}:{port}. Check the host name is right and "
+                f"that your provider allows {kind.upper()} access for this mailbox.")
+    if "authentication" in low or "auth" in low or "login" in low or "credentials" in low:
+        return (f"{text} — the server was reached, so the host and port are right; it "
+                f"rejected the username or password. Providers with 2-factor sign-in "
+                f"usually need an app password rather than the normal one.")
+    if "certificate" in low or "ssl" in low:
+        return f"{text} — TLS problem talking to {host}:{port}. Check the port matches your provider's."
+    if "name or service not known" in low or "nodename" in low or "getaddrinfo" in low:
+        return f"{text} — the host name {host} could not be found. Check it for typos."
+    return f"{text} (at {host}:{port})"
 
 
 def test_connection(mailbox: Mailbox) -> dict:
@@ -60,14 +100,14 @@ def test_connection(mailbox: Mailbox) -> dict:
             conn.logout()
         result["imap"] = True
     except Exception as exc:  # noqa: BLE001 - report any failure to the UI
-        result["error"] = f"IMAP: {exc}"
+        result["error"] = "IMAP: " + _diagnose(exc, mailbox.imap_host, int(mailbox.imap_port or 993), "imap")
         return result
     try:
         smtp = _smtp_connect(mailbox)
         smtp.quit()
         result["smtp"] = True
     except Exception as exc:  # noqa: BLE001
-        result["error"] = f"SMTP: {exc}"
+        result["error"] = "SMTP: " + _diagnose(exc, mailbox.smtp_host, int(mailbox.smtp_port or 587), "smtp")
     return result
 
 

@@ -117,7 +117,10 @@ export default function Layout() {
           </button>
         </div>
 
-        {NAV.map((group) => (
+        {/* The links scroll on their own so the footer — and its Logout — stays put
+            no matter how many sections the nav grows to. */}
+        <nav className="sidebar-nav">
+          {NAV.map((group) => (
           <div className="nav-group" key={group.section}>
             <div className="nav-label">{group.section}</div>
             {group.items.map(([to, label, icon, end]) => {
@@ -130,7 +133,8 @@ export default function Layout() {
               );
             })}
           </div>
-        ))}
+          ))}
+        </nav>
 
         <div className="sidebar-footer">
           <div className="nav-item" style={{ pointerEvents: "none" }}>

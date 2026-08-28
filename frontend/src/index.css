@@ -91,7 +91,7 @@ h1, h2, h3, h4 { margin: 0; font-weight: 650; letter-spacing: -0.01em; }
   height: 100vh;
 }
 
-.brand { display: flex; align-items: center; gap: 12px; padding: 6px 8px 18px; }
+.brand { display: flex; align-items: center; gap: 12px; padding: 6px 8px 18px; flex: 0 0 auto; }
 .brand-logo {
   width: 38px; height: 38px; border-radius: 11px;
   display: grid; place-items: center;
@@ -121,7 +121,19 @@ h1, h2, h3, h4 { margin: 0; font-weight: 650; letter-spacing: -0.01em; }
 }
 .nav-item.active svg { color: #fff; }
 
-.sidebar-footer { margin-top: auto; padding-top: 12px; border-top: 1px solid var(--border); }
+/* Takes the leftover height and scrolls its own overflow. min-height:0 is what
+   actually lets a flex child shrink below its content — without it the list keeps
+   its full height, pushes the footer past the bottom of the 100vh sidebar, and
+   Logout becomes unreachable once the nav grows past one screen. */
+.sidebar-nav { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+/* Thin scrollbar so the list does not look like a second panel. */
+.sidebar-nav { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+.sidebar-nav::-webkit-scrollbar { width: 6px; }
+.sidebar-nav::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 3px; }
+.sidebar-nav::-webkit-scrollbar-track { background: transparent; }
+
+/* Pinned: never scrolls away, so signing out is always one click. */
+.sidebar-footer { flex: 0 0 auto; padding-top: 12px; border-top: 1px solid var(--border); }
 .status-dot {
   display: inline-block; width: 8px; height: 8px; border-radius: 50%;
   background: var(--success); box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 25%, transparent);

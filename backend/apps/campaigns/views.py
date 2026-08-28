@@ -1,5 +1,6 @@
 import csv
 import io
+import re
 
 from django.db import models
 from django.utils import timezone
@@ -19,6 +20,94 @@ from .serializers import (
     ContactListSerializer,
     ContactSerializer,
 )
+
+# Any address found in free text. Deliberately permissive: pasted lists arrive
+# wrapped in angle brackets, quoted names, trailing commas and stray whitespace.
+_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
+# "Jane Doe" <jane@example.com> — the shape you get when copying out of a mail client.
+_NAMED_RE = re.compile(r'^\s*"?([^"<@]+?)"?\s*<\s*([^>\s]+)\s*>\s*$')
+
+
+def parse_recipients(raw: str) -> tuple[list[dict], int]:
+    """Read pasted text as contacts. Returns (rows, ignored_line_count).
+
+    Two shapes are accepted, told apart by whether the first line is a header:
+
+      * a spreadsheet export with an `email` column, plus whatever else it carries
+      * a bare list of addresses — one per line, or comma/space separated
+
+    The bare list is the common case for cold outreach, where all anyone has is a
+    column of addresses and no names to go with them.
+    """
+    text = (raw or "").strip()
+    if not text:
+        return [], 0
+
+    first = next((ln for ln in text.splitlines() if ln.strip()), "")
+    # A header row names its columns and holds no addresses; a data row has an "@".
+    if "@" not in first:
+        return _parse_csv(text)
+    return _parse_plain(text)
+
+
+def _parse_plain(text: str) -> tuple[list[dict], int]:
+    """Pull addresses out of an unstructured list, keeping any display names."""
+    rows, seen, ignored = [], set(), 0
+    for line in text.splitlines():
+        line = line.strip().rstrip(",;")
+        if not line:
+            continue
+        found = _EMAIL_RE.findall(line)
+        if not found:
+            ignored += 1
+            continue
+        # A single "Name <addr>" line carries a name worth keeping; a line holding
+        # several addresses is just a list, so no name is inferred for any of them.
+        named = _NAMED_RE.match(line) if len(found) == 1 else None
+        for addr in found:
+            addr = addr.strip().lower()
+            if addr in seen:
+                continue
+            seen.add(addr)
+            row = {"email": addr, "fields": {}}
+            if named:
+                whole = named.group(1).strip()
+                first, _, last = whole.partition(" ")
+                row["first_name"], row["last_name"] = first, last.strip()
+            rows.append(row)
+    return rows, ignored
+
+
+def _parse_csv(text: str) -> tuple[list[dict], int]:
+    """Read a spreadsheet export whose header names an email column."""
+    reader = csv.DictReader(io.StringIO(text))
+    if not reader.fieldnames:
+        return [], 0
+    mapping = {name: _KNOWN_COLUMNS.get((name or "").strip().lower()) for name in reader.fieldnames}
+    if "email" not in mapping.values():
+        raise ValueError(
+            "This looks like a spreadsheet, but none of its columns is called 'email'. "
+            "Rename the column to 'email', or paste just the addresses instead."
+        )
+    rows, seen, ignored = [], set(), 0
+    for raw_row in reader:
+        attrs, extra = {}, {}
+        for column, value in raw_row.items():
+            field = mapping.get(column)
+            if field:
+                attrs[field] = (value or "").strip()
+            elif column:
+                extra[column.strip()] = (value or "").strip()
+        email = (attrs.pop("email", "") or "").strip().lower()
+        if not email or not _EMAIL_RE.fullmatch(email):
+            ignored += 1
+            continue
+        if email in seen:
+            continue
+        seen.add(email)
+        rows.append({"email": email, "fields": extra, **attrs})
+    return rows, ignored
+
 
 # Columns we map onto real fields; anything else is kept in Contact.fields and
 # stays available to templates as its own {{tag}}.
@@ -52,7 +141,11 @@ class ContactViewSet(WorkspaceScopedMixin, viewsets.ModelViewSet):
 
     @action(detail=False, methods=["post"])
     def import_csv(self, request):
-        """Bulk-import contacts from pasted CSV text, optionally onto a list.
+        """Bulk-import contacts from pasted text, optionally onto a list.
+
+        Accepts either a spreadsheet export with an `email` column or a bare list of
+        addresses — the latter being what cold outreach usually starts from, where
+        there are no names to go with the addresses.
 
         Re-importing an address updates that contact instead of duplicating it, and
         never revives one that unsubscribed — honouring an opt-out is the whole point
@@ -61,7 +154,8 @@ class ContactViewSet(WorkspaceScopedMixin, viewsets.ModelViewSet):
         raw = request.data.get("csv", "")
         list_id = request.data.get("list")
         if not raw.strip():
-            return Response({"detail": "No CSV supplied."}, status=http.HTTP_400_BAD_REQUEST)
+            return Response({"detail": "Nothing to import — paste some addresses first."},
+                            status=http.HTTP_400_BAD_REQUEST)
 
         workspace = self.get_workspace()
         target_list = None
@@ -70,40 +164,34 @@ class ContactViewSet(WorkspaceScopedMixin, viewsets.ModelViewSet):
             if target_list is None:
                 return Response({"detail": "List not found."}, status=http.HTTP_400_BAD_REQUEST)
 
-        reader = csv.DictReader(io.StringIO(raw.strip()))
-        if not reader.fieldnames:
-            return Response({"detail": "CSV has no header row."}, status=http.HTTP_400_BAD_REQUEST)
-
-        mapping = {name: _KNOWN_COLUMNS.get((name or "").strip().lower()) for name in reader.fieldnames}
-        if "email" not in mapping.values():
+        try:
+            rows, ignored = parse_recipients(raw)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=http.HTTP_400_BAD_REQUEST)
+        if not rows:
             return Response(
-                {"detail": "CSV needs an 'email' column."}, status=http.HTTP_400_BAD_REQUEST
+                {"detail": "No email addresses found in what you pasted."},
+                status=http.HTTP_400_BAD_REQUEST,
             )
 
-        created = updated = skipped = 0
+        created = updated = 0
         touched: list[Contact] = []
-        for row in reader:
-            attrs, extra = {}, {}
-            for column, value in row.items():
-                field = mapping.get(column)
-                if field:
-                    attrs[field] = (value or "").strip()
-                elif column:
-                    extra[column.strip()] = (value or "").strip()
-            email = (attrs.get("email") or "").strip().lower()
-            if not email or "@" not in email:
-                skipped += 1
-                continue
+        for row in rows:
+            email = row["email"]
+            extra = row.get("fields") or {}
+            attrs = {k: v for k, v in row.items() if k not in ("email", "fields") and v}
 
             contact, was_created = Contact.objects.get_or_create(
                 workspace=workspace, email=email,
-                defaults={k: v for k, v in attrs.items() if k != "email"} | {"fields": extra},
+                defaults={**attrs, "fields": extra},
             )
             if was_created:
                 created += 1
             else:
+                # Only fill in blanks and new columns; never overwrite what is there
+                # with the empty cells a bare address list is full of.
                 for field, value in attrs.items():
-                    if field != "email" and value:
+                    if value:
                         setattr(contact, field, value)
                 if extra:
                     contact.fields = {**(contact.fields or {}), **extra}
@@ -115,7 +203,7 @@ class ContactViewSet(WorkspaceScopedMixin, viewsets.ModelViewSet):
             target_list.contacts.add(*touched)
 
         return Response({
-            "created": created, "updated": updated, "skipped": skipped,
+            "created": created, "updated": updated, "skipped": ignored,
             "list": target_list.name if target_list else None,
         })
 
