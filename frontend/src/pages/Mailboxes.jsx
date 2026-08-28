@@ -184,7 +184,7 @@ export default function Mailboxes() {
       <div className="card">
         <table className="table">
           <thead>
-            <tr><th>Name</th><th>Address</th><th>IMAP / SMTP</th><th>Status</th><th>Poll · Delay</th><th>Last polled</th><th></th></tr>
+            <tr><th>Name</th><th>Address</th><th>Mail servers</th><th>Status</th><th>Checks every · waits</th><th>Last checked</th><th></th></tr>
           </thead>
           <tbody>
             {rows.map((m) => (
@@ -332,13 +332,13 @@ function MailboxForm({ value, onChange }) {
         </div>
       )}
 
-      <h4 style={{ margin: "10px 0 12px", color: "var(--text-muted)" }}>Timing for this account</h4>
+      <h4 style={{ margin: "10px 0 12px", color: "var(--text-muted)" }}>How often should we check this account?</h4>
       <div className="field-row">
-        <Field label="Poll every (seconds)">
+        <Field label="Check for new mail every (seconds)">
           <input className="input" type="number" min="10" placeholder="workspace default"
             value={value.poll_interval_seconds ?? ""} onChange={setNum("poll_interval_seconds")} />
         </Field>
-        <Field label="Reply delay (minutes)">
+        <Field label="Wait before replying (minutes)">
           <input className="input" type="number" min="0" placeholder="workspace default"
             value={value.reply_delay_minutes ?? ""} onChange={setNum("reply_delay_minutes")} />
         </Field>
@@ -349,7 +349,7 @@ function MailboxForm({ value, onChange }) {
       </div>
 
       <div className="field-row">
-        <Field label="Daily send limit (0 = no limit)">
+        <Field label="Most emails to send per day (0 = no limit)">
           <input className="input" type="number" min="0"
             value={value.daily_send_limit ?? 0} onChange={setNum("daily_send_limit")} />
         </Field>
@@ -363,7 +363,7 @@ function MailboxForm({ value, onChange }) {
       </div>
       <div className="hint-inline" style={{ marginBottom: 14 }}>
         Once this account reaches its cap, auto-replies are sent through any route on the
-        <b> Sending routes</b> page marked "use for auto-replies" instead of pushing the
+        <b> Ways to send</b> page marked “also use for automatic replies”, instead of pushing the
         account past a limit that gets it throttled. Gmail allows roughly 500/day on a
         consumer account and 2,000 on Workspace.
       </div>

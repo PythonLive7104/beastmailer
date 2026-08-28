@@ -81,7 +81,7 @@ export default function Campaigns() {
   const act = async (fn, row, okMessage) => {
     try {
       const r = await fn(row.id);
-      toast(okMessage || `Campaign ${r.status}`);
+      toast(okMessage || `Campaign is now ${r.status}`);
       load();
       if (report?.id === row.id) openReport({ ...row, ...r });
     } catch (e) { toast(e.detail?.detail || "Action failed", "err"); }
@@ -136,7 +136,7 @@ export default function Campaigns() {
         lead="Send one email to a whole list of people at once — a newsletter, an announcement or an offer. Write it once, choose who gets it, and the app sends it out gradually and tells you who opened it and who clicked."
       steps={[
         "Add the people you want to reach on the Audience page.",
-        "Set up at least one way to send on the Sending routes page.",
+        "Set up at least one way to send on the Ways to send page.",
         "Come back here, write your email, pick the list, and press Send.",
       ]}
       />
@@ -150,8 +150,8 @@ export default function Campaigns() {
       {activeSenders.length === 0 && (
         <div className="card" style={{ padding: 16 }}>
           <div className="hint-inline">
-            No active sending routes yet — a campaign has nothing to send through.
-            Add one on the <b>Sending routes</b> page first.
+            You have no way to send email yet, so campaigns cannot go out. Open
+            <b> Sending → Ways to send</b> and add one — using your own mailbox is the quickest start.
           </div>
         </div>
       )}
@@ -159,7 +159,7 @@ export default function Campaigns() {
       <div className="card">
         <table className="table">
           <thead>
-            <tr><th>Campaign</th><th>Audience</th><th>Progress</th><th>Opens</th><th>Clicks</th><th>Status</th><th></th></tr>
+            <tr><th>Campaign</th><th>People</th><th>Sent so far</th><th>Opened</th><th>Clicked</th><th>Status</th><th></th></tr>
           </thead>
           <tbody>
             {rows.map((c) => {
@@ -170,6 +170,13 @@ export default function Campaigns() {
                   <td className="subj">
                     {c.name}
                     <div className="muted">{c.subject}</div>
+                    {c.status === "draft" && (activeSenders.length === 0 || c.audience_size === 0) && (
+                      <div className="muted" style={{ color: "var(--danger)" }}>
+                        Can't send yet — needs{" "}
+                        {[activeSenders.length === 0 && "a way to send",
+                          c.audience_size === 0 && "contacts"].filter(Boolean).join(" and ")}.
+                      </div>
+                    )}
                   </td>
                   <td className="mono">{c.audience_size}</td>
                   <td className="mono">
@@ -181,11 +188,23 @@ export default function Campaigns() {
                   <td><span className={`badge ${STATUS_BADGE[c.status]}`}>{c.status}</span></td>
                   <td>
                     <div className="row" style={{ justifyContent: "flex-end", gap: 6 }}>
-                      {(c.status === "draft" || c.status === "failed") && (
-                        <button className="btn btn-sm btn-primary" onClick={() => start(c)} title="Start sending">
-                          <Icon.play /> Send
-                        </button>
-                      )}
+                      {(c.status === "draft" || c.status === "failed") && (() => {
+                        // Spell the blocker out here rather than making them press
+                        // Send to find out why nothing happens.
+                        const missing = [];
+                        if (activeSenders.length === 0) missing.push("a way to send");
+                        if (c.audience_size === 0) missing.push("contacts to send to");
+                        return (
+                          <button
+                            className="btn btn-sm btn-primary"
+                            disabled={missing.length > 0}
+                            title={missing.length ? `First add ${missing.join(" and ")}.` : "Start sending"}
+                            onClick={() => start(c)}
+                          >
+                            <Icon.play /> Send
+                          </button>
+                        );
+                      })()}
                       {(c.status === "sending" || c.status === "scheduled") && (
                         <button className="btn btn-sm" onClick={() => act(api.campaigns.pause, c)}>Pause</button>
                       )}
@@ -193,7 +212,7 @@ export default function Campaigns() {
                         <button className="btn btn-sm btn-primary" onClick={() => act(api.campaigns.resume, c)}>Resume</button>
                       )}
                       {c.status === "sending" && (
-                        <button className="btn btn-sm" onClick={() => act(api.campaigns.sendNow, c, "Batch sent")} title="Send a batch now">
+                        <button className="btn btn-sm" onClick={() => act(api.campaigns.sendNow, c, "Batch sent")} title="Send the next batch straight away">
                           Send batch
                         </button>
                       )}
@@ -237,9 +256,9 @@ export default function Campaigns() {
             </Field>
           </div>
 
-          <Field label="Preview text">
+          <Field label="Preview line (shown next to the subject in the inbox)">
             <input className="input" value={editing.preheader}
-              placeholder="Shown after the subject line in most inboxes"
+              placeholder="A short teaser — most inboxes show this beside the subject"
               onChange={(e) => setEditing({ ...editing, preheader: e.target.value })} />
           </Field>
 
@@ -254,7 +273,7 @@ export default function Campaigns() {
             style={{ minHeight: 240, width: "100%" }} value={editing.body}
             onChange={(e) => setEditing({ ...editing, body: e.target.value })} />
 
-          <div className="page-sub" style={{ margin: "12px 0 6px" }}>Insert a tag:</div>
+          <div className="page-sub" style={{ margin: "12px 0 6px" }}>Add their details automatically:</div>
           <div className="row" style={{ flexWrap: "wrap", gap: 6 }}>
             {TAGS.map(([tag, hint]) => (
               <span className="chip" key={tag} data-tip={hint} role="button" tabIndex={0}
@@ -264,12 +283,12 @@ export default function Campaigns() {
             ))}
           </div>
           <div className="hint-inline">
-            Every tag from the auto-reply palette works here too. An unsubscribe link is required
-            by Gmail and Yahoo for bulk mail — one is added to the headers automatically, but keep
-            a visible one in the footer.
+            Click one to drop it into your message. When the email is sent, each tag is swapped for
+            that person's real details, so everyone gets their own version. Keep the unsubscribe
+            link in your footer — Gmail and Yahoo require bulk email to have one.
           </div>
 
-          <div className="page-sub" style={{ margin: "16px 0 6px" }}>Send to:</div>
+          <div className="page-sub" style={{ margin: "16px 0 6px" }}>Who should get this email?</div>
           <div className="row" style={{ flexWrap: "wrap", gap: 6 }}>
             {lists.map((l) => (
               <span key={l.id} role="button" tabIndex={0}
@@ -278,50 +297,52 @@ export default function Campaigns() {
                 onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleIn("lists", l.id); } }}
               >{l.name} · {l.mailable_count}</span>
             ))}
-            {lists.length === 0 && <span className="muted">No lists yet — create one on the Audience page.</span>}
+            {lists.length === 0 && <span className="muted">No lists yet — add people on the Audience page first.</span>}
           </div>
 
-          <div className="page-sub" style={{ margin: "16px 0 6px" }}>Send through:</div>
+          <div className="page-sub" style={{ margin: "16px 0 6px" }}>Which account should send it?</div>
           <div className="row" style={{ flexWrap: "wrap", gap: 6 }}>
             {activeSenders.map((s) => (
               <span key={s.id} role="button" tabIndex={0}
                 className={`chip ${editing.senders.includes(s.id) ? "chip-on" : ""}`}
                 onClick={() => toggleIn("senders", s.id)}
                 onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleIn("senders", s.id); } }}
-              >{s.name}{s.is_overflow ? " (overflow)" : ""}</span>
+              >{s.name}{s.is_overflow ? " (backup)" : ""}</span>
             ))}
-            {activeSenders.length === 0 && <span className="muted">No active routes — add one on Sending routes.</span>}
+            {activeSenders.length === 0 && <span className="muted">Nothing set up yet — add one under Sending → Ways to send.</span>}
           </div>
 
           <div className="field-row" style={{ marginTop: 16 }}>
-            <Field label="Schedule for (blank = send now)">
+            <Field label="When should it go out? (leave blank to send now)">
               <input className="input" type="datetime-local"
                 value={editing.scheduled_for ? editing.scheduled_for.slice(0, 16) : ""}
                 onChange={(e) => setEditing({ ...editing, scheduled_for: e.target.value || null })} />
             </Field>
-            <Field label="Emails per engine tick">
+            <Field label="Send how many at a time?">
               <input className="input" type="number" min="1" value={editing.per_tick_limit}
                 onChange={(e) => setEditing({ ...editing, per_tick_limit: Number(e.target.value) })} />
             </Field>
           </div>
           <div className="hint-inline">
-            The per-tick limit paces the whole campaign on top of each route's own caps — lower it
-            for a slow drip that looks less like a blast.
+            The app sends in small batches rather than all at once, which looks more natural and
+            keeps you inside your provider's limits. 25 at a time is a sensible default; lower it
+            to trickle the campaign out more slowly.
           </div>
 
           <div className="row" style={{ marginTop: 16, gap: 24 }}>
             <label className="row" style={{ gap: 8 }}>
               <Switch checked={editing.track_opens} onChange={(v) => setEditing({ ...editing, track_opens: v })} />
-              <span className="page-sub">Track opens</span>
+              <span className="page-sub">Count who opens it</span>
             </label>
             <label className="row" style={{ gap: 8 }}>
               <Switch checked={editing.track_clicks} onChange={(v) => setEditing({ ...editing, track_clicks: v })} />
-              <span className="page-sub">Track clicks</span>
+              <span className="page-sub">Count who clicks a link</span>
             </label>
           </div>
           <div className="hint-inline">
-            Open tracking uses a pixel that Apple Mail Privacy Protection and many corporate
-            clients block, so treat the open rate as a floor. Click tracking is reliable.
+            “Opens” counts who viewed the email, but many mail apps — Apple Mail especially — block
+            the way this is measured, so the real number is always higher than it looks. “Clicks”
+            counts who clicked a link in your email, and that number is dependable.
           </div>
         </Modal>
       )}

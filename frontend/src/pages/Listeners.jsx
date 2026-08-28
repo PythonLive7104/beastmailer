@@ -38,7 +38,7 @@ export default function Listeners() {
             </div>
             <div className="muted" style={{ marginTop: 6 }}>{m.email_address}</div>
             <div className="page-sub" style={{ marginTop: 8 }}>
-              Last poll: {m.last_polled_at ? new Date(m.last_polled_at).toLocaleTimeString() : "never"}
+              Last checked: {m.last_polled_at ? new Date(m.last_polled_at).toLocaleTimeString() : "never"}
             </div>
             {m.last_error && <div className="badge badge-failed" style={{ marginTop: 8 }}>{m.last_error.slice(0, 40)}</div>}
           </div>

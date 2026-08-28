@@ -7,7 +7,7 @@ const MATCH_TYPES = [
   ["contains", "Subject contains"],
   ["equals", "Subject equals"],
   ["starts_with", "Subject starts with"],
-  ["regex", "Subject matches regex"],
+  ["regex", "Subject matches a pattern (advanced)"],
 ];
 
 const BLANK = { name: "", match_type: "contains", match_value: "", case_sensitive: false, template: "", mailboxes: [], attachments: [], is_active: true, priority: 100 };

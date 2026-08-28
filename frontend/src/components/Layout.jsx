@@ -16,7 +16,7 @@ const NAV = [
     section: "Sending",
     items: [
       ["/mailboxes", "Mailboxes", "mailbox"],
-      ["/senders", "Sending routes", "tower"],
+      ["/senders", "Ways to send", "tower"],
     ],
   },
   {
@@ -60,7 +60,7 @@ const TITLES = {
   "/": ["Dashboard", "How your email has been doing today"],
   "/campaigns": ["Campaigns", "Send one email to a whole list of people"],
   "/audience": ["Audience", "The people your campaigns go to"],
-  "/senders": ["Sending routes", "The ways this app can send your email"],
+  "/senders": ["Ways to send", "The accounts and services that send your email"],
   "/mailboxes": ["Mailboxes", "The email accounts this app signs into"],
   "/auto-reply": ["Auto-reply", "The ready-made replies sent on your behalf"],
   "/rules": ["Rules", "Decides which reply each email gets"],

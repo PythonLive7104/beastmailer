@@ -78,7 +78,7 @@ export default function Placeholders() {
           <Field label="Description"><input className="input" value={editing.description} onChange={(e) => setEditing({ ...editing, description: e.target.value })} /></Field>
           <div className="row" style={{ marginBottom: 12 }}>
             <Switch checked={editing.is_dynamic} onChange={(v) => setEditing({ ...editing, is_dynamic: v })} />
-            <span className="page-sub">Dynamic (resolved by the engine, e.g. sender_name)</span>
+            <span className="page-sub">Filled in automatically for each email (like the sender's name)</span>
           </div>
           {!editing.is_dynamic && (
             <Field label="Static value"><textarea className="textarea" value={editing.static_value} onChange={(e) => setEditing({ ...editing, static_value: e.target.value })} /></Field>

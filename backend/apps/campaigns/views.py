@@ -109,6 +109,10 @@ def _parse_csv(text: str) -> tuple[list[dict], int]:
     return rows, ignored
 
 
+# Where an import goes when the user did not pick a list. Named rather than blank
+# so it shows up in the list picker like any other audience.
+DEFAULT_IMPORT_LIST = "Imported contacts"
+
 # Columns we map onto real fields; anything else is kept in Contact.fields and
 # stays available to templates as its own {{tag}}.
 _KNOWN_COLUMNS = {
@@ -129,7 +133,9 @@ class ContactViewSet(WorkspaceScopedMixin, viewsets.ModelViewSet):
         if (state := params.get("status")):
             qs = qs.filter(status=state)
         if (list_id := params.get("list")):
-            qs = qs.filter(lists__id=list_id)
+            # "none" surfaces contacts on no list at all: they are invisible to every
+            # campaign, so they need to be findable and fixable in bulk.
+            qs = qs.filter(lists__isnull=True) if list_id == "none" else qs.filter(lists__id=list_id)
         if (search := params.get("search")):
             qs = qs.filter(
                 models.Q(email__icontains=search)
@@ -159,10 +165,24 @@ class ContactViewSet(WorkspaceScopedMixin, viewsets.ModelViewSet):
 
         workspace = self.get_workspace()
         target_list = None
-        if list_id:
+        new_list_name = (request.data.get("list_name") or "").strip()
+        if new_list_name:
+            target_list, _ = ContactList.objects.get_or_create(
+                workspace=workspace, name=new_list_name
+            )
+        elif list_id:
             target_list = ContactList.objects.filter(workspace=workspace, pk=list_id).first()
             if target_list is None:
                 return Response({"detail": "List not found."}, status=http.HTTP_400_BAD_REQUEST)
+        else:
+            # An import always lands on a list. Campaigns send to lists, so filing an
+            # import nowhere produced contacts that existed but could never be
+            # emailed — a silent dead end. Defaulting here means every import is
+            # usable straight away; the list can be renamed or merged later.
+            target_list, _ = ContactList.objects.get_or_create(
+                workspace=workspace, name=DEFAULT_IMPORT_LIST,
+                defaults={"description": "Contacts added by import without a list chosen."},
+            )
 
         try:
             rows, ignored = parse_recipients(raw)
@@ -205,6 +225,8 @@ class ContactViewSet(WorkspaceScopedMixin, viewsets.ModelViewSet):
         return Response({
             "created": created, "updated": updated, "skipped": ignored,
             "list": target_list.name if target_list else None,
+            "list_id": target_list.id if target_list else None,
+            "warning": "",
         })
 
     @action(detail=False, methods=["post"])
@@ -346,10 +368,12 @@ class CampaignViewSet(WorkspaceScopedMixin, viewsets.ModelViewSet):
             return Response({"detail": f"Campaign is already {campaign.status}."},
                             status=http.HTTP_400_BAD_REQUEST)
         if not campaign.senders.filter(is_active=True).exists():
-            return Response({"detail": "Add at least one active sending route first."},
+            return Response({"detail": "You have no way to send yet. Open Sending → Ways to "
+                                       "send and add one — your own mailbox is the quickest."},
                             status=http.HTTP_400_BAD_REQUEST)
         if not campaign.lists.exists():
-            return Response({"detail": "Pick at least one contact list."},
+            return Response({"detail": "This campaign has no audience. Edit it and choose at "
+                                       "least one list under “Send to”."},
                             status=http.HTTP_400_BAD_REQUEST)
 
         added = materialise(campaign)

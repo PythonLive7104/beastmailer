@@ -51,10 +51,10 @@ export default function Configuration() {
       <div className="card card-pad">
         <h3 style={{ marginBottom: 8 }}>How it works</h3>
         <ol className="page-sub" style={{ lineHeight: 1.9, paddingLeft: 18 }}>
-          <li>Every <b>{cfg.poll_interval_seconds}s</b> the engine checks each active mailbox over IMAP.</li>
+          <li>Every <b>{cfg.poll_interval_seconds}s</b> the app checks each active mailbox over IMAP.</li>
           <li>New mail is matched against your active <b>Rules</b> by subject.</li>
           <li>On a match, a reply is drafted from the template and scheduled.</li>
-          <li>After the <b>{cfg.reply_delay_minutes}-minute</b> delay, it's sent over SMTP.</li>
+          <li>After the <b>{cfg.reply_delay_minutes}-minute</b> delay, the reply is sent.</li>
           <li>Replies are threaded back to the original sent email by subject.</li>
         </ol>
       </div>

@@ -85,8 +85,16 @@ export default function Audience() {
   const runImport = async () => {
     setBusy(true);
     try {
-      const r = await api.contacts.importCsv({ csv: importing.csv, list: importing.list || null });
-      toast(`Imported: ${r.created} new, ${r.updated} updated, ${r.skipped} skipped`);
+      const r = await api.contacts.importCsv({
+        csv: importing.csv,
+        list: importing.list && importing.list !== "new" ? importing.list : null,
+        list_name: importing.list === "new" ? importing.list_name : "",
+      });
+      toast(
+        `Imported: ${r.created} new, ${r.updated} updated, ${r.skipped} skipped` +
+        (r.list ? ` → ${r.list}` : ""),
+      );
+      if (r.list_id) setFilter((f) => ({ ...f, list: String(r.list_id) }));
       setImporting(null);
       loadContacts();
       loadLists();
@@ -103,10 +111,16 @@ export default function Audience() {
     loadLists();
   };
 
+  // A picker, not a prompt: the old version asked people to type a numeric list id
+  // read out of a text blob, which nobody could reasonably do.
+  const [listPicker, setListPicker] = useState(null);
   const addToList = () => {
     if (!lists?.length) return toast("Create a list first", "err");
-    const name = prompt(`Add ${selected.length} contact(s) to which list?\n\n${lists.map((l) => `${l.id} — ${l.name}`).join("\n")}`);
-    if (name) bulk("add_to_list", { list: Number(name) });
+    setListPicker({ list: String(lists[0].id) });
+  };
+  const confirmAddToList = async () => {
+    await bulk("add_to_list", { list: Number(listPicker.list) });
+    setListPicker(null);
   };
 
   const toggle = (id) => setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
@@ -128,7 +142,12 @@ export default function Audience() {
       <div className="section-head">
         <div className="spacer" />
         <div className="row" style={{ gap: 8 }}>
-          <button className="btn" onClick={() => setImporting({ csv: "", list: "" })}>
+          {/* Preselect only the list being viewed. Silently defaulting to whatever
+              list happens to exist would merge a cold-outreach import into, say, a
+              newsletter audience — emailing people who never asked for it. */}
+          <button className="btn" onClick={() => setImporting({
+            csv: "", list: filter.list && filter.list !== "none" ? filter.list : "", list_name: "",
+          })}>
             <Icon.plus /> Import contacts
           </button>
           <button className="btn" onClick={() => setListEditing({ name: "", description: "" })}>
@@ -176,6 +195,7 @@ export default function Audience() {
             onChange={(e) => setFilter({ ...filter, list: e.target.value })}>
             <option value="">All lists</option>
             {lists.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+            <option value="none">⚠ Not on any list</option>
           </select>
           <select className="input" style={{ maxWidth: 170 }} value={filter.status}
             onChange={(e) => setFilter({ ...filter, status: e.target.value })}>
@@ -224,7 +244,11 @@ export default function Audience() {
               </tr>
             ))}
             {contacts.length === 0 && (
-              <tr><td colSpan={6}><div className="empty">No contacts match. Import a CSV to get started.</div></td></tr>
+              <tr><td colSpan={6}><div className="empty">
+                {filter.list === "none"
+                  ? "Good — every contact belongs to at least one list."
+                  : "No contacts here yet. Use Import contacts to add some."}
+              </div></td></tr>
             )}
           </tbody>
         </table>
@@ -238,13 +262,27 @@ export default function Audience() {
               {busy ? "Importing…" : "Import"}
             </button>
           </>}>
-          <Field label="Add to list (optional)">
+          <Field label="Which list should these go on?">
             <select className="input" value={importing.list}
               onChange={(e) => setImporting({ ...importing, list: e.target.value })}>
-              <option value="">Don't add to a list</option>
+              <option value="">Imported contacts (default)</option>
               {lists.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+              <option value="new">+ Create a new list…</option>
             </select>
           </Field>
+          {importing.list === "new" && (
+            <Field label="Name for the new list">
+              <input className="input" autoFocus placeholder="Promotion"
+                value={importing.list_name}
+                onChange={(e) => setImporting({ ...importing, list_name: e.target.value })} />
+            </Field>
+          )}
+          {!importing.list && (
+            <div className="hint-inline">
+              Leave this as it is and your contacts go onto a list called
+              <b> Imported contacts</b>, ready to use in a campaign straight away.
+            </div>
+          )}
           <Field label="Email addresses">
             <textarea className="textarea mono" style={{ minHeight: 220, width: "100%" }}
               placeholder={SAMPLE_PLAIN} value={importing.csv}
@@ -279,6 +317,24 @@ export default function Audience() {
             Re-importing an address updates it rather than duplicating it, and never resubscribes
             someone who opted out. If you only have addresses, avoid <code>{"{{first_name}}"}</code> in
             your campaign — it falls back to “there”.
+          </div>
+        </Modal>
+      )}
+
+      {listPicker && (
+        <Modal title={`Add ${selected.length} contact(s) to a list`} onClose={() => setListPicker(null)}
+          footer={<>
+            <button className="btn" onClick={() => setListPicker(null)}>Cancel</button>
+            <button className="btn btn-primary" onClick={confirmAddToList}>Add to list</button>
+          </>}>
+          <Field label="List">
+            <select className="input" value={listPicker.list}
+              onChange={(e) => setListPicker({ list: e.target.value })}>
+              {lists.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+            </select>
+          </Field>
+          <div className="hint-inline">
+            A contact can be on several lists. Adding them again changes nothing.
           </div>
         </Modal>
       )}

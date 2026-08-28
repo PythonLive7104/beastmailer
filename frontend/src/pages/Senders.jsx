@@ -8,32 +8,32 @@ import { Field, Loader, Modal, PageIntro, Switch, useToast } from "../components
 const KINDS = {
   mailbox: {
     label: "Workspace mailbox",
-    hint: "Sends through an account you already connected for auto-reply. Free, already warm, but capped low by the provider (Gmail cuts off around 500/day).",
+    hint: "Uses one of your own email accounts — the ones under Sending → Mailboxes. Free, and already trusted because you send from it every day. The catch is the daily limit: Gmail stops you at around 500 emails a day.",
     fields: ["mailbox", "use_proxy"],
   },
   smtp: {
     label: "External SMTP relay",
-    hint: "Any provider's SMTP endpoint. Works with every service on this list — use it when you have SMTP credentials rather than an API key.",
+    hint: "For any provider not listed here. Use this when they gave you a server address, a username and a password rather than an API key. Their help pages will list the details.",
     fields: ["from", "smtp", "auth"],
   },
   ses: {
     label: "Amazon SES",
-    hint: "Cheapest at volume (~$0.10 per 1,000). Enter your SES SMTP credentials — not your AWS access key — and the region. Verify your domain and request production access first.",
+    hint: "Amazon's email service — by far the cheapest for large volumes, around 10 cents per thousand emails. Set-up takes longer: you must prove you own your domain and ask Amazon to lift the starter limit. Use the SES SMTP username and password, not your main AWS key.",
     fields: ["from", "region", "auth"],
   },
   sendgrid: {
     label: "SendGrid",
-    hint: "Paste an API key with Mail Send permission. No SMTP settings needed.",
+    hint: "Create an API key in SendGrid with permission to send mail, then paste it below. Nothing else to fill in.",
     fields: ["from", "apikey"],
   },
   mailgun: {
     label: "Mailgun",
-    hint: "Needs your sending domain and a private API key.",
+    hint: "Paste your private API key from Mailgun, and the domain you set up with them.",
     fields: ["from", "domain", "apikey"],
   },
   postmark: {
     label: "Postmark",
-    hint: "Uses a Server API token. Campaigns are sent on the broadcast stream, which is what Postmark requires for bulk mail.",
+    hint: "Paste a Server API token from Postmark. Campaigns are sent on their broadcast stream, which is what Postmark requires for bulk email.",
     fields: ["from", "apikey"],
   },
 };
@@ -82,7 +82,7 @@ export default function Senders() {
   };
 
   const remove = async (row) => {
-    if (!confirm(`Delete sending route "${row.name}"?`)) return;
+    if (!confirm(`Delete "${row.name}"? Campaigns using it will stop sending through it.`)) return;
     await api.senders.remove(row.id);
     toast("Deleted");
     load();
@@ -105,17 +105,17 @@ export default function Senders() {
     <div className="grid">
       <PageIntro
         id="senders"
-        lead="The ways this app can send email for you. That is either one of your own email accounts, or an outside sending service such as Amazon SES or Mailgun. Adding more than one matters because every email account has a daily limit — when one runs out, the app automatically continues with another instead of stopping."
+        lead="Every email you send leaves through one of the accounts or services listed here. That is either one of your own email accounts, or an outside sending service such as Amazon SES. Adding more than one matters because every email account has a daily limit — when one runs out, the app carries on with another instead of stopping."
       steps={[
-        "Your own email accounts are added under Sending \u2192 Mailboxes, then picked here.",
+        "Your own email accounts are added under Sending \u2192 Mailboxes, then chosen here.",
         "An outside service is worth adding if you send to more than a few hundred people.",
-        "Mark a service as \u201coverflow\u201d and it is only used once your own accounts hit their daily limit.",
+        "Tick \u201conly use when the others are full\u201d on a paid service and it stays unused until your own accounts run out for the day.",
       ]}
       />
       <div className="section-head">
         <div className="spacer" />
         <button className="btn btn-primary" onClick={() => setEditing({ ...BLANK })}>
-          <Icon.plus /> New route
+          <Icon.plus /> Add a way to send
         </button>
       </div>
 
@@ -123,18 +123,18 @@ export default function Senders() {
         <div className="card" style={{ padding: 16 }}>
           <div className="row" style={{ gap: 28, flexWrap: "wrap" }}>
             <div>
-              <div className="page-sub">Remaining today</div>
+              <div className="page-sub">Emails you can still send today</div>
               <div style={{ fontSize: 22, fontWeight: 600 }}>
                 {capacity.unlimited ? `${capacity.remaining_today.toLocaleString()}+` : capacity.remaining_today.toLocaleString()}
               </div>
             </div>
             <div>
-              <div className="page-sub">Active routes</div>
+              <div className="page-sub">Ways to send set up</div>
               <div style={{ fontSize: 22, fontWeight: 600 }}>{capacity.routes}</div>
             </div>
             {capacity.unlimited && (
               <div className="hint-inline" style={{ alignSelf: "center", maxWidth: 420 }}>
-                One or more routes have no daily cap, so the real ceiling is your provider's plan limit.
+                One of these has no daily limit set, so the real ceiling is whatever your provider allows.
               </div>
             )}
           </div>
@@ -145,8 +145,8 @@ export default function Senders() {
         <table className="table">
           <thead>
             <tr>
-              <th>Route</th><th>Type</th><th>Sends as</th><th>Today</th>
-              <th>Weight</th><th>Role</th><th>Status</th><th></th>
+              <th>Name</th><th>Service</th><th>Sends from</th><th>Sent today</th>
+              <th>Share</th><th>When it's used</th><th>On?</th><th></th>
             </tr>
           </thead>
           <tbody>
@@ -160,23 +160,25 @@ export default function Senders() {
                 <td className="mono muted">{s.sender_email || "—"}</td>
                 <td className="mono">
                   {s.sent_today}
-                  {s.remaining_today !== null && <span className="muted"> / {s.sent_today + s.remaining_today}</span>}
+                  {s.remaining_today !== null
+                    ? <span className="muted"> of {s.sent_today + s.remaining_today}</span>
+                    : <span className="muted"> (no limit)</span>}
                 </td>
-                <td className="mono">{s.weight}×</td>
+                <td className="mono">{s.weight === 1 ? "normal" : `${s.weight}× more`}</td>
                 <td>
                   <span className={`badge ${s.is_overflow ? "badge-neutral" : "badge-sent"}`}>
-                    {s.is_overflow ? "overflow" : "primary"}
+                    {s.is_overflow ? "only when others are full" : "used first"}
                   </span>
-                  {s.use_for_replies && <div className="muted" style={{ fontSize: 11 }}>+ auto-replies</div>}
+                  {s.use_for_replies && <div className="muted" style={{ fontSize: 11 }}>also sends auto-replies</div>}
                 </td>
                 <td>
                   <span className={`badge ${s.is_active ? "badge-sent" : "badge-neutral"}`}>
-                    {s.is_active ? "active" : "off"}
+                    {s.is_active ? "in use" : "paused"}
                   </span>
                 </td>
                 <td>
                   <div className="row" style={{ justifyContent: "flex-end", gap: 6 }}>
-                    <button className="btn btn-sm btn-ghost" onClick={() => test(s)} title="Send a test email">
+                    <button className="btn btn-sm btn-ghost" onClick={() => test(s)} title="Send a test email to check this works">
                       <Icon.play />
                     </button>
                     <button className="btn btn-sm btn-ghost" onClick={() => setEditing({ ...s, secret: "" })}>
@@ -190,8 +192,9 @@ export default function Senders() {
             {rows.length === 0 && (
               <tr><td colSpan={8}>
                 <div className="empty">
-                  No sending routes yet. Add one mailbox to start, then an external provider
-                  for volume — campaigns can use both at once.
+                  Nothing set up yet. Start by adding one of your own mailboxes; add an outside
+                  service like Amazon SES later if you need to send to more people than your
+                  own account allows in a day.
                 </div>
               </td></tr>
             )}
@@ -202,7 +205,7 @@ export default function Senders() {
       {editing && (
         <Modal
           wide
-          title={editing.id ? "Edit sending route" : "New sending route"}
+          title={editing.id ? "Edit a way to send" : "Add a way to send"}
           onClose={() => setEditing(null)}
           footer={<>
             <button className="btn" onClick={() => setEditing(null)}>Cancel</button>
@@ -212,11 +215,11 @@ export default function Senders() {
           </>}
         >
           <div className="field-row">
-            <Field label="Route name">
-              <input className="input" value={editing.name} placeholder="SES bulk"
+            <Field label="Name this (anything you like)">
+              <input className="input" value={editing.name} placeholder="Amazon SES for newsletters"
                 onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
             </Field>
-            <Field label="Type">
+            <Field label="What are you sending through?">
               <select className="input" value={editing.kind}
                 onChange={(e) => setEditing({ ...editing, kind: e.target.value })}>
                 {Object.entries(KINDS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
@@ -226,7 +229,7 @@ export default function Senders() {
           <div className="hint-inline">{KINDS[editing.kind]?.hint}</div>
 
           {shows("mailbox") && (
-            <Field label="Mailbox">
+            <Field label="Which of your accounts?">
               <select className="input" value={editing.mailbox || ""}
                 onChange={(e) => setEditing({ ...editing, mailbox: e.target.value ? Number(e.target.value) : null })}>
                 <option value="">Select a mailbox…</option>
@@ -237,11 +240,11 @@ export default function Senders() {
 
           {shows("from") && (
             <div className="field-row">
-              <Field label="From address">
+              <Field label="Address emails are sent from">
                 <input className="input" value={editing.from_email} placeholder="news@your-domain.com"
                   onChange={(e) => setEditing({ ...editing, from_email: e.target.value })} />
               </Field>
-              <Field label="From name">
+              <Field label="Name people will see">
                 <input className="input" value={editing.from_name} placeholder="Your Company"
                   onChange={(e) => setEditing({ ...editing, from_name: e.target.value })} />
               </Field>
@@ -249,12 +252,12 @@ export default function Senders() {
           )}
 
           {editing.kind !== "mailbox" && (
-            <Field label="Reply-To">
+            <Field label="Where replies should go">
               <input className="input" value={editing.reply_to} placeholder="hello@your-domain.com"
                 onChange={(e) => setEditing({ ...editing, reply_to: e.target.value })} />
               <div className="hint-inline">
-                Point this at a mailbox the engine polls and replies to your campaign flow straight
-                back into the auto-reply rules.
+                When someone replies to your campaign, their reply goes to this address. Use one of
+                your own mailboxes and those replies will be answered automatically like any other.
               </div>
             </Field>
           )}
@@ -306,67 +309,70 @@ export default function Senders() {
             </Field>
           )}
 
-          <div className="page-sub" style={{ margin: "16px 0 6px" }}>Pacing</div>
+          <div className="page-sub" style={{ margin: "16px 0 6px" }}>How fast should this send?</div>
           <div className="field-row">
-            <Field label="Daily limit (0 = unlimited)">
+            <Field label="Most emails per day (0 = no limit)">
               <input className="input" type="number" min="0" value={editing.daily_limit}
                 onChange={(e) => setEditing({ ...editing, daily_limit: Number(e.target.value) })} />
             </Field>
-            <Field label="Hourly limit (0 = unlimited)">
+            <Field label="Most emails per hour (0 = no limit)">
               <input className="input" type="number" min="0" value={editing.hourly_limit}
                 onChange={(e) => setEditing({ ...editing, hourly_limit: Number(e.target.value) })} />
             </Field>
-            <Field label="Weight">
+            <Field label="Share of sending">
               <input className="input" type="number" min="1" value={editing.weight}
                 onChange={(e) => setEditing({ ...editing, weight: Number(e.target.value) })} />
             </Field>
           </div>
           <div className="hint-inline">
-            Weight sets the share of sends this route takes: a weight-5 provider absorbs five
-            emails for every one a weight-1 mailbox sends.
+            Leave the share at 1 unless you want one of them doing more of the work. Set it to 5
+            and that one sends five emails for every one the others send. Daily and hourly limits
+            protect an account from being cut off for sending too much — check what your provider
+            allows and stay under it.
           </div>
 
           <div className="row" style={{ marginTop: 16, gap: 24, flexWrap: "wrap" }}>
             <label className="row" style={{ gap: 8 }}>
               <Switch checked={editing.is_overflow}
                 onChange={(v) => setEditing({ ...editing, is_overflow: v })} />
-              <span className="page-sub">Overflow only</span>
+              <span className="page-sub">Only use this when the others are full</span>
             </label>
             {editing.kind !== "mailbox" && (
               <label className="row" style={{ gap: 8 }}>
                 <Switch checked={editing.use_proxy}
                   onChange={(v) => setEditing({ ...editing, use_proxy: v })} />
-                <span className="page-sub">Route through proxies</span>
+                <span className="page-sub">Send through proxies (advanced)</span>
               </label>
             )}
             {editing.kind !== "mailbox" && (
               <label className="row" style={{ gap: 8 }}>
                 <Switch checked={editing.use_for_replies}
                   onChange={(v) => setEditing({ ...editing, use_for_replies: v })} />
-                <span className="page-sub">Use for auto-replies too</span>
+                <span className="page-sub">Also use this for automatic replies</span>
               </label>
             )}
             <label className="row" style={{ gap: 8 }}>
               <Switch checked={editing.is_active}
                 onChange={(v) => setEditing({ ...editing, is_active: v })} />
-              <span className="page-sub">Active</span>
+              <span className="page-sub">Ready to use</span>
             </label>
           </div>
           <div className="hint-inline">
-            An overflow route sits idle until every primary route has hit its cap — the way to say
-            "use the mailboxes first, then fall back to the provider".
+            Turn this on and the app leaves it alone until everything else has hit its daily limit.
+            That is how you say “send from my own account first, and only use the paid service once
+            it runs out”.
           </div>
           {editing.kind !== "mailbox" && editing.use_for_replies && (
             <>
               <div className="field-row" style={{ marginTop: 12 }}>
-                <Field label="Send borrowed replies as">
+                <Field label="Who should replies appear to come from?">
                   <select className="input" value={editing.reply_identity}
                     onChange={(e) => setEditing({ ...editing, reply_identity: e.target.value })}>
                     <option value="route">This route's address, Reply-To the mailbox (safe)</option>
                     <option value="mailbox">The mailbox's own address (needs a verified domain)</option>
                   </select>
                 </Field>
-                <Field label="Authorised domains">
+                <Field label="Domains this service may send for">
                   <input className="input" value={editing.authorized_domains}
                     placeholder={editing.from_email ? editing.from_email.split("@")[1] : "your-domain.com"}
                     disabled={editing.reply_identity === "route"}

@@ -57,7 +57,7 @@ export default function Dashboard() {
   const stats = [
     { label: "Mailbox", value: `${data.mailboxes.active} active`, foot: `${data.mailboxes.total} configured`, ok: true },
     { label: "Auto-reply", value: data.auto_reply.enabled ? "Enabled" : "Disabled", foot: `Delay ${data.reply_delay_minutes} min`, ok: data.auto_reply.enabled },
-    { label: "Poll interval", value: `${data.poll_interval_seconds}`, foot: "seconds" },
+    { label: "Checks for mail every", value: `${data.poll_interval_seconds}`, foot: "seconds" },
     { label: "Reply delay", value: `${data.reply_delay_minutes}`, foot: "minutes" },
   ];
 
@@ -105,7 +105,7 @@ export default function Dashboard() {
           <div className="row">
             <span className="page-sub">Showing {data.recent_activity.length} of last 50</span>
             <button className="btn btn-primary btn-sm" onClick={runNow} disabled={running}>
-              <Icon.play /> {running ? "Running…" : "Run engine"}
+              <Icon.play /> {running ? "Checking…" : "Check for mail now"}
             </button>
             <button className="btn btn-sm" onClick={load}><Icon.refresh /> Refresh</button>
           </div>

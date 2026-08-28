@@ -224,7 +224,7 @@ export default function AutoReply() {
               <div className="page-sub" style={{ margin: "14px 0 6px" }}>Live preview</div>
               <HtmlPreview html={editing.body} height={260} />
               <div className="hint-inline">
-                Sent as multipart/alternative — a plain-text version is generated automatically
+                A plain-text version is created automatically
                 for clients that refuse HTML. Placeholders work inside markup.
               </div>
             </>
