@@ -216,7 +216,7 @@ export default function Protected() {
             </Field>
           </div>
 
-          {editing.requires_passcode && (
+          {(editing.requires_passcode || editing.passcode) && (
             <div className="field-row">
               <Field label="On a wrong passcode (hosted link)">
                 <select className="input" value={editing.wrong_passcode_action}
@@ -226,9 +226,11 @@ export default function Protected() {
                   <option value="back">Send the visitor back</option>
                 </select>
               </Field>
-              <Field label=" ">
-                <label className="row" style={{ gap: 6, paddingTop: 8 }}><Switch checked={editing.clear_passcode} onChange={(v) => setEditing({ ...editing, clear_passcode: v })} /><span className="page-sub">Remove passcode</span></label>
-              </Field>
+              {editing.requires_passcode && (
+                <Field label=" ">
+                  <label className="row" style={{ gap: 6, paddingTop: 8 }}><Switch checked={editing.clear_passcode} onChange={(v) => setEditing({ ...editing, clear_passcode: v })} /><span className="page-sub">Remove passcode</span></label>
+                </Field>
+              )}
             </div>
           )}
 
