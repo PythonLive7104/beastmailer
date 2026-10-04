@@ -19,6 +19,8 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
+from .htmlmin import minify_html
+
 PBKDF2_ITERATIONS = 200_000
 
 
@@ -31,25 +33,30 @@ def _derive_key(passcode: str, salt: bytes) -> bytes:
     return kdf.derive(passcode.encode("utf-8"))
 
 
-def _deterrent_js(doc) -> str:
+def deterrents_js(disable_right_click=False, disable_copy=False, disable_print=False) -> str:
     bits = []
-    if doc.disable_right_click:
+    if disable_right_click:
         bits.append("document.addEventListener('contextmenu',e=>e.preventDefault());")
-    if doc.disable_copy:
+    if disable_copy:
         bits.append("document.addEventListener('copy',e=>e.preventDefault());")
         bits.append("document.addEventListener('selectstart',e=>e.preventDefault());")
-    if doc.disable_print:
+    if disable_print:
         bits.append("window.addEventListener('beforeprint',()=>{document.body.style.display='none';});")
         bits.append("window.addEventListener('afterprint',()=>{document.body.style.display='';});")
     return "".join(bits)
 
 
-def build_protected_html(doc, passcode: str = "") -> str:
-    """Return a self-contained protected HTML document for `doc` (a page)."""
-    plaintext = doc.get_payload()  # the original page HTML, as bytes
-    if doc.minify:
-        from .htmlmin import minify_html
-        plaintext = minify_html(plaintext.decode("utf-8", errors="replace")).encode("utf-8")
+def _deterrent_js(doc) -> str:
+    return deterrents_js(doc.disable_right_click, doc.disable_copy, doc.disable_print)
+
+
+def encrypt_html_document(plaintext: bytes, title: str, passcode: str = "",
+                          expires_ms: int = 0, deterrents: str = "") -> str:
+    """Core: wrap raw HTML bytes into a standalone, encrypted, self-contained file.
+
+    Independent of any model, so it serves both single-page export and whole-site
+    zip processing.
+    """
     salt = os.urandom(16)
     iv = os.urandom(12)
 
@@ -69,10 +76,43 @@ def build_protected_html(doc, passcode: str = "") -> str:
         "iv": _b64(iv),
         "iter": PBKDF2_ITERATIONS,
         "keyless": keyless_key_b64,  # "" when a passcode is required
-        "deterrents": _deterrent_js(doc),
-        "title": doc.name,
+        "expires": int(expires_ms) if expires_ms else 0,  # client-side expiry (epoch ms)
+        "deterrents": deterrents,
+        "title": title,
     }
     return _TEMPLATE.replace("/*__CONFIG__*/", json.dumps(cfg))
+
+
+def _inline_assets(doc, html: str) -> str:
+    """Replace this page's gated asset URLs with embedded data: URIs.
+
+    The exported file carries its images inside the ciphertext, so it needs no
+    server for them and the images are encrypted alongside the page — cleaner and
+    stronger than shipping separate protected image files.
+    """
+    for asset in doc.assets.all():
+        gated = f"/g/{doc.slug}/asset/{asset.id}/"
+        if gated in html:
+            uri = f"data:{asset.content_type or 'application/octet-stream'};base64,{_b64(asset.get_payload())}"
+            html = html.replace(gated, uri)
+    return html
+
+
+def build_protected_html(doc, passcode: str = "", expires_ms: int = 0, inline_assets: bool = True) -> str:
+    """Return a self-contained protected HTML document for `doc` (a page).
+
+    expires_ms: optional client-side expiry (epoch milliseconds); 0 = none.
+    inline_assets: embed the page's gated assets as data: URIs before encrypting.
+    """
+    html = doc.get_payload().decode("utf-8", errors="replace")
+    if inline_assets:
+        html = _inline_assets(doc, html)
+    if doc.minify:
+        html = minify_html(html)
+    return encrypt_html_document(
+        html.encode("utf-8"), doc.name, passcode=passcode,
+        expires_ms=expires_ms, deterrents=_deterrent_js(doc),
+    )
 
 
 # The exported file. All logic is inline; no external requests, so it works
@@ -118,8 +158,13 @@ async function unlock(pc){
     : await keyFromPasscode(pc);
   return tryDecrypt(key);
 }
+function expired(){
+  document.querySelector('.card').innerHTML =
+    '<h1>Expired</h1><p>This content has expired and can no longer be viewed.</p>';
+}
 (async () => {
   document.title = CFG.title || 'Protected';
+  if (CFG.expires && Date.now() > CFG.expires) { expired(); return; }
   if (CFG.keyless) {            // no passcode required
     try { reveal(await unlock('')); } catch(e){ document.getElementById('err').textContent='Could not load content.'; }
     return;
