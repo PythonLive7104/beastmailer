@@ -122,6 +122,23 @@ export const api = {
     remove: (id) => request(`/attachments/${id}/`, { method: "DELETE" }),
   },
 
+  protectedContent: {
+    list: () => request("/protected-content/").then(list),
+    // Inline HTML pages go as JSON; file uploads go as multipart (createFile).
+    create: (body) => request("/protected-content/", { method: "POST", body }),
+    createFile: (formData) => uploadFile("/protected-content/", formData),
+    update: (id, body) => request(`/protected-content/${id}/`, { method: "PATCH", body }),
+    updateFile: (id, formData) => uploadFile(`/protected-content/${id}/`, formData, "PATCH"),
+    remove: (id) => request(`/protected-content/${id}/`, { method: "DELETE" }),
+    revoke: (id) => request(`/protected-content/${id}/revoke/`, { method: "POST" }),
+    activate: (id) => request(`/protected-content/${id}/activate/`, { method: "POST" }),
+    resetViews: (id) => request(`/protected-content/${id}/reset-views/`, { method: "POST" }),
+    accessLog: (id) => request(`/protected-content/${id}/access-log/`),
+    assets: (id) => request(`/protected-content/${id}/assets/`),
+    uploadAsset: (id, formData) => uploadFile(`/protected-content/${id}/assets/`, formData),
+    removeAsset: (id, assetId) => request(`/protected-content/${id}/assets/${assetId}/`, { method: "DELETE" }),
+  },
+
   // --- Campaigns ------------------------------------------------------------
   campaigns: {
     list: () => request("/campaigns/").then(list),
@@ -198,8 +215,8 @@ export const api = {
   },
 };
 
-async function uploadFile(path, formData) {
-  const res = await fetch(`${BASE}${path}`, { method: "POST", headers: authHeaders(), body: formData });
+async function uploadFile(path, formData, method = "POST") {
+  const res = await fetch(`${BASE}${path}`, { method, headers: authHeaders(), body: formData });
   if (!res.ok) {
     const err = new Error(`${res.status} ${res.statusText}`);
     try { err.detail = await res.json(); } catch { err.detail = await res.text(); }

@@ -15,6 +15,7 @@ import Listeners from "./pages/Listeners";
 import Placeholders from "./pages/Placeholders";
 import Links from "./pages/Links";
 import Attachments from "./pages/Attachments";
+import ProtectedContent from "./pages/Protected";
 import Proxies from "./pages/Proxies";
 import Telegram from "./pages/Telegram";
 import Security from "./pages/Security";
@@ -55,6 +56,7 @@ export default function App() {
           <Route path="placeholders" element={<Placeholders />} />
           <Route path="links" element={<Links />} />
           <Route path="attachments" element={<Attachments />} />
+          <Route path="protected" element={<ProtectedContent />} />
           <Route path="proxies" element={<Proxies />} />
           <Route path="team" element={<Team />} />
           <Route path="billing" element={<Billing />} />
