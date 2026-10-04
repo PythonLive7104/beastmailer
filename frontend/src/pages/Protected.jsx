@@ -15,6 +15,7 @@ const BLANK = {
   disable_right_click: false,
   disable_copy: false,
   disable_print: false,
+  block_shortcuts: false,
   minify: false,
   wrong_passcode_action: "prompt",
   is_active: true,
@@ -40,6 +41,8 @@ export default function Protected() {
   const [logFor, setLogFor] = useState(null);
   const [exportFor, setExportFor] = useState(null);
   const [batchOpen, setBatchOpen] = useState(false);
+  const [siteOpen, setSiteOpen] = useState(false);
+  const [scriptOpen, setScriptOpen] = useState(false);
   const toast = useToast();
 
   const load = () => api.protectedContent.list().then(setRows);
@@ -75,6 +78,7 @@ export default function Protected() {
         fd.append("disable_right_click", String(e.disable_right_click));
         fd.append("disable_copy", String(e.disable_copy));
         fd.append("disable_print", String(e.disable_print));
+        fd.append("block_shortcuts", String(e.block_shortcuts));
         fd.append("wrong_passcode_action", e.wrong_passcode_action);
         fd.append("is_active", String(e.is_active));
         if (e.id) await api.protectedContent.updateFile(e.id, fd);
@@ -88,6 +92,7 @@ export default function Protected() {
           disable_right_click: e.disable_right_click,
           disable_copy: e.disable_copy,
           disable_print: e.disable_print,
+          block_shortcuts: e.block_shortcuts,
           minify: e.minify,
           wrong_passcode_action: e.wrong_passcode_action,
           is_active: e.is_active,
@@ -132,6 +137,8 @@ export default function Protected() {
       />
       <div className="section-head">
         <div className="spacer" />
+        <button className="btn" onClick={() => setScriptOpen(true)}><Icon.download /> Protect .js/.css</button>
+        <button className="btn" onClick={() => setSiteOpen(true)}><Icon.download /> Protect a site (.zip)</button>
         {rows.some((r) => r.kind === "page") && (
           <button className="btn" onClick={() => setBatchOpen(true)}><Icon.download /> Batch export</button>
         )}
@@ -250,6 +257,7 @@ export default function Protected() {
               <label className="row" style={{ gap: 6 }}><Switch checked={editing.disable_right_click} onChange={(v) => setEditing({ ...editing, disable_right_click: v })} /><span className="page-sub">No right-click</span></label>
               <label className="row" style={{ gap: 6 }}><Switch checked={editing.disable_copy} onChange={(v) => setEditing({ ...editing, disable_copy: v })} /><span className="page-sub">No copy/select</span></label>
               <label className="row" style={{ gap: 6 }}><Switch checked={editing.disable_print} onChange={(v) => setEditing({ ...editing, disable_print: v })} /><span className="page-sub">No print</span></label>
+              <label className="row" style={{ gap: 6 }}><Switch checked={editing.block_shortcuts} onChange={(v) => setEditing({ ...editing, block_shortcuts: v })} /><span className="page-sub">Block F12 / Ctrl+U / Ctrl+S</span></label>
               {editing.kind === "page" && <label className="row" style={{ gap: 6 }}><Switch checked={editing.minify} onChange={(v) => setEditing({ ...editing, minify: v })} /><span className="page-sub">Minify source</span></label>}
             </div>
           </Field>
@@ -262,13 +270,99 @@ export default function Protected() {
       {logFor && <LogModal doc={logFor} onClose={() => setLogFor(null)} />}
       {exportFor && <ExportModal doc={exportFor} onClose={() => setExportFor(null)} toast={toast} />}
       {batchOpen && <BatchExportModal pages={rows.filter((r) => r.kind === "page")} onClose={() => setBatchOpen(false)} toast={toast} />}
+      {siteOpen && <SiteModal onClose={() => setSiteOpen(false)} toast={toast} />}
+      {scriptOpen && <ScriptModal onClose={() => setScriptOpen(false)} toast={toast} />}
     </div>
+  );
+}
+
+function ScriptModal({ onClose, toast }) {
+  const [file, setFile] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const isCss = (file?.name || "").toLowerCase().endsWith(".css");
+
+  const run = async () => {
+    if (!file) { toast("Choose a .js or .css file", "err"); return; }
+    setBusy(true);
+    try {
+      const fd = new FormData();
+      fd.append("upload", file);
+      const { blob, filename } = await api.protectedContent.protectScript(fd);
+      saveBlob(blob, filename);
+      toast("Protected file downloaded");
+      onClose();
+    } catch (e) { toast(`Failed: ${JSON.stringify(e.detail)}`, "err"); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <Modal title="Protect a .js / .css file" onClose={onClose}
+      footer={<>
+        <button className="btn" onClick={onClose}>Cancel</button>
+        <button className="btn btn-primary" onClick={run} disabled={busy}>{busy ? "Protecting…" : "Protect & download"}</button>
+      </>}>
+      <p className="page-sub">Obfuscates a standalone script or stylesheet so its source isn't readable in View Source. This is <b>obfuscation, not encryption</b> — the key ships in the file, so a determined reader can recover it (same as Protware's script protection).</p>
+      <Field label="File (.js or .css)"><input className="input" type="file" accept=".js,.css" onChange={(e) => setFile(e.target.files?.[0] || null)} /></Field>
+      {isCss && (
+        <p className="page-sub" style={{ marginTop: 8 }}>
+          A .css becomes a <b>.js loader</b> (stylesheets can't self-decrypt). Reference it with
+          {" "}<code>&lt;script src="{file.name}.js"&gt;&lt;/script&gt;</code> instead of the <code>&lt;link&gt;</code> tag.
+        </p>
+      )}
+    </Modal>
+  );
+}
+
+function SiteModal({ onClose, toast }) {
+  const [file, setFile] = useState(null);
+  const [passcode, setPasscode] = useState("");
+  const [expiresAt, setExpiresAt] = useState("");
+  const [minify, setMinify] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const run = async () => {
+    if (!file) { toast("Choose a .zip of your site", "err"); return; }
+    setBusy(true);
+    try {
+      const fd = new FormData();
+      fd.append("upload", file);
+      fd.append("passcode", passcode);
+      if (expiresAt) fd.append("expires_at", expiresAt);
+      fd.append("minify", String(minify));
+      const { blob, filename } = await api.protectedContent.protectSite(fd);
+      saveBlob(blob, filename);
+      toast("Protected site downloaded");
+      onClose();
+    } catch (e) { toast(`Failed: ${JSON.stringify(e.detail)}`, "err"); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <Modal title="Protect a whole site (.zip)" onClose={onClose}
+      footer={<>
+        <button className="btn" onClick={onClose}>Cancel</button>
+        <button className="btn btn-primary" onClick={run} disabled={busy}>{busy ? "Protecting…" : "Protect & download .zip"}</button>
+      </>}>
+      <p className="page-sub">Upload a .zip of a static website. Every .html page is encrypted and made self-contained — its CSS, scripts and images are embedded — while links between pages keep working. You get back a .zip of protected files you can host anywhere. Nothing is stored here.</p>
+      <Field label="Site .zip"><input className="input" type="file" accept=".zip" onChange={(e) => setFile(e.target.files?.[0] || null)} /></Field>
+      <div className="field-row">
+        <Field label="Passcode (recommended)">
+          <input className="input" type="text" value={passcode} onChange={(e) => setPasscode(e.target.value)} placeholder="viewers type this to unlock" />
+        </Field>
+        <Field label="Expires at (optional)">
+          <input className="input" type="datetime-local" value={expiresAt} onChange={(e) => setExpiresAt(e.target.value)} />
+        </Field>
+      </div>
+      <label className="row" style={{ gap: 6 }}><Switch checked={minify} onChange={setMinify} /><span className="page-sub">Minify source</span></label>
+      <p className="page-sub" style={{ marginTop: 8 }}>Files must be served over <b>https://</b> (or opened from disk) — plain http:// blocks the decryption.</p>
+    </Modal>
   );
 }
 
 function BatchExportModal({ pages, onClose, toast }) {
   const [selected, setSelected] = useState(() => new Set(pages.map((p) => p.id)));
   const [passcode, setPasscode] = useState("");
+  const [expiresAt, setExpiresAt] = useState("");
   const [busy, setBusy] = useState(false);
 
   const toggle = (id) => {
@@ -282,7 +376,7 @@ function BatchExportModal({ pages, onClose, toast }) {
     if (!ids.length) { toast("Select at least one page", "err"); return; }
     setBusy(true);
     try {
-      const { blob, filename } = await api.protectedContent.exportBatch(ids, passcode);
+      const { blob, filename } = await api.protectedContent.exportBatch(ids, passcode, expiresAt);
       saveBlob(blob, filename);
       toast("Batch exported");
       onClose();
@@ -297,9 +391,14 @@ function BatchExportModal({ pages, onClose, toast }) {
         <button className="btn btn-primary" onClick={run} disabled={busy}>{busy ? "Building…" : `Download .zip (${selected.size})`}</button>
       </>}>
       <p className="page-sub">Encrypts each selected page into its own standalone HTML file and downloads them as a .zip. One passcode protects every file in the batch.</p>
-      <Field label="Passcode for all files (recommended)">
-        <input className="input" type="text" value={passcode} onChange={(e) => setPasscode(e.target.value)} placeholder="viewers type this to unlock" />
-      </Field>
+      <div className="field-row">
+        <Field label="Passcode for all files (recommended)">
+          <input className="input" type="text" value={passcode} onChange={(e) => setPasscode(e.target.value)} placeholder="viewers type this to unlock" />
+        </Field>
+        <Field label="Expires at (optional)">
+          <input className="input" type="datetime-local" value={expiresAt} onChange={(e) => setExpiresAt(e.target.value)} />
+        </Field>
+      </div>
       <Field label="Pages">
         <div style={{ maxHeight: 220, overflowY: "auto" }}>
           {pages.map((p) => (
@@ -368,12 +467,13 @@ function AssetsModal({ doc, onClose, copy, toast }) {
 
 function ExportModal({ doc, onClose, toast }) {
   const [passcode, setPasscode] = useState("");
+  const [expiresAt, setExpiresAt] = useState("");
   const [busy, setBusy] = useState(false);
 
   const download = async () => {
     setBusy(true);
     try {
-      const { blob, filename } = await api.protectedContent.exportHtml(doc.id, passcode);
+      const { blob, filename } = await api.protectedContent.exportHtml(doc.id, passcode, expiresAt);
       saveBlob(blob, filename);
       toast("Protected file downloaded");
       onClose();
@@ -387,15 +487,21 @@ function ExportModal({ doc, onClose, toast }) {
         <button className="btn" onClick={onClose}>Cancel</button>
         <button className="btn btn-primary" onClick={download} disabled={busy}>{busy ? "Building…" : "Download .html"}</button>
       </>}>
-      <p className="page-sub">Downloads a self-contained HTML file you can host on any server. The page is encrypted with AES-256; the viewer enters the passcode to unlock it. The passcode is never stored in the file.</p>
-      <Field label="Export passcode (recommended)">
-        <input className="input" type="text" value={passcode} onChange={(e) => setPasscode(e.target.value)} placeholder="viewers type this to unlock" autoFocus />
-      </Field>
+      <p className="page-sub">Downloads a self-contained HTML file you can host on any server. Its images are embedded and encrypted inside the file. The page is encrypted with AES-256; the viewer enters the passcode to unlock it, and the passcode is never stored in the file.</p>
+      <div className="field-row">
+        <Field label="Export passcode (recommended)">
+          <input className="input" type="text" value={passcode} onChange={(e) => setPasscode(e.target.value)} placeholder="viewers type this to unlock" autoFocus />
+        </Field>
+        <Field label="Expires at (optional)">
+          <input className="input" type="datetime-local" value={expiresAt} onChange={(e) => setExpiresAt(e.target.value)} />
+        </Field>
+      </div>
       <p className="page-sub" style={{ marginTop: 8 }}>
         {passcode
           ? "Strong: without this passcode the content cannot be read, even by someone who downloads the file."
           : "⚠ No passcode: the file opens with no prompt and its source can be recovered — this is obfuscation only. Add a passcode for real protection."}
       </p>
+      <p className="page-sub" style={{ marginTop: 6 }}>Note: the file must be opened over <b>https://</b> (or from disk). On a plain http:// site the browser blocks the decryption and the page won't unlock.</p>
     </Modal>
   );
 }

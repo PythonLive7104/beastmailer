@@ -135,11 +135,11 @@ export const api = {
     resetViews: (id) => request(`/protected-content/${id}/reset-views/`, { method: "POST" }),
     accessLog: (id) => request(`/protected-content/${id}/access-log/`),
     // Returns the standalone protected .html as a Blob for the browser to save.
-    exportHtml: async (id, passcode) => {
+    exportHtml: async (id, passcode, expiresAt) => {
       const res = await fetch(`${BASE}/protected-content/${id}/export/`, {
         method: "POST",
         headers: authHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify({ passcode: passcode || "" }),
+        body: JSON.stringify({ passcode: passcode || "", expires_at: expiresAt || "" }),
       });
       if (!res.ok) {
         const err = new Error(`${res.status} ${res.statusText}`);
@@ -150,11 +150,11 @@ export const api = {
       const m = disp.match(/filename="?([^"]+)"?/);
       return { blob: await res.blob(), filename: m ? m[1] : "protected.html" };
     },
-    exportBatch: async (ids, passcode) => {
+    exportBatch: async (ids, passcode, expiresAt) => {
       const res = await fetch(`${BASE}/protected-content/export-batch/`, {
         method: "POST",
         headers: authHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify({ ids, passcode: passcode || "" }),
+        body: JSON.stringify({ ids, passcode: passcode || "", expires_at: expiresAt || "" }),
       });
       if (!res.ok) {
         const err = new Error(`${res.status} ${res.statusText}`);
@@ -162,6 +162,32 @@ export const api = {
         throw err;
       }
       return { blob: await res.blob(), filename: "protected-pages.zip" };
+    },
+    // Protect a whole static site: POST a .zip (as FormData), get a protected .zip back.
+    protectSite: async (formData) => {
+      const res = await fetch(`${BASE}/protected-content/protect-site/`, {
+        method: "POST", headers: authHeaders(), body: formData,
+      });
+      if (!res.ok) {
+        const err = new Error(`${res.status} ${res.statusText}`);
+        try { err.detail = await res.json(); } catch { err.detail = await res.text(); }
+        throw err;
+      }
+      return { blob: await res.blob(), filename: "protected-site.zip" };
+    },
+    // Obfuscate a standalone .js/.css into a self-decrypting .js.
+    protectScript: async (formData) => {
+      const res = await fetch(`${BASE}/protected-content/protect-script/`, {
+        method: "POST", headers: authHeaders(), body: formData,
+      });
+      if (!res.ok) {
+        const err = new Error(`${res.status} ${res.statusText}`);
+        try { err.detail = await res.json(); } catch { err.detail = await res.text(); }
+        throw err;
+      }
+      const disp = res.headers.get("Content-Disposition") || "";
+      const m = disp.match(/filename="?([^"]+)"?/);
+      return { blob: await res.blob(), filename: m ? m[1] : "protected.js" };
     },
     assets: (id) => request(`/protected-content/${id}/assets/`),
     uploadAsset: (id, formData) => uploadFile(`/protected-content/${id}/assets/`, formData),

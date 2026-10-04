@@ -10,6 +10,7 @@ from django.shortcuts import get_object_or_404
 from django.utils.html import escape
 from django.views.decorators.csrf import csrf_exempt
 
+from .export import _deterrent_js
 from .gate import check_access, check_asset_access
 from .htmlmin import minify_html
 from .models import ProtectedAccessLog, ProtectedAsset, ProtectedDocument
@@ -53,16 +54,8 @@ def _passcode_form(doc, error: str = "") -> HttpResponse:
 
 
 def _deterrent_script(doc) -> str:
-    bits = []
-    if doc.disable_right_click:
-        bits.append("document.addEventListener('contextmenu',e=>e.preventDefault());")
-    if doc.disable_copy:
-        bits.append("document.addEventListener('copy',e=>e.preventDefault());")
-        bits.append("document.addEventListener('selectstart',e=>e.preventDefault());")
-    if doc.disable_print:
-        bits.append("window.addEventListener('beforeprint',()=>{document.body.style.display='none';});")
-        bits.append("window.addEventListener('afterprint',()=>{document.body.style.display='';});")
-    return f"<script>{''.join(bits)}</script>" if bits else ""
+    js = _deterrent_js(doc)
+    return f"<script>{js}</script>" if js else ""
 
 
 def _serve_payload(doc) -> HttpResponse:
