@@ -27,6 +27,8 @@ class ProtectedDocument(models.Model):
     # Encrypted payload. Bytea/BLOB; the plaintext is never persisted.
     ciphertext = models.BinaryField(blank=True)
     content_type = models.CharField(max_length=120, blank=True, default="")
+    # Original uploaded filename (with extension) so file downloads stay usable.
+    original_filename = models.CharField(max_length=255, blank=True, default="")
     size = models.PositiveBigIntegerField(default=0, help_text="Plaintext size in bytes")
 
     # --- Server-enforced access controls ---

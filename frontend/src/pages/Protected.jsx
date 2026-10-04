@@ -167,6 +167,7 @@ export default function Protected() {
                   <td><span className={`badge ${d.is_active ? "badge-sent" : "badge-neutral"}`}>{d.is_active ? "active" : "revoked"}</span></td>
                   <td>
                     <div className="row" style={{ justifyContent: "flex-end", gap: 6 }}>
+                      <button className="btn btn-sm btn-ghost" title={d.kind === "file" ? "Open / download" : "Open link"} onClick={() => window.open(url, "_blank")}><Icon.links /></button>
                       {d.kind === "page" && <button className="btn btn-sm btn-ghost" title="Export protected .html" onClick={() => setExportFor(d)}><Icon.download /></button>}
                       {d.kind === "page" && <button className="btn btn-sm btn-ghost" title="Assets" onClick={() => setAssetsFor(d)}><Icon.attachments /></button>}
                       <button className="btn btn-sm btn-ghost" title="Access log" onClick={() => setLogFor(d)}><Icon.listeners /></button>
