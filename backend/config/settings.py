@@ -40,6 +40,7 @@ INSTALLED_APPS = [
     "apps.security",
     "apps.billing",
     "apps.campaigns",
+    "apps.protected_content",
 ]
 
 MIDDLEWARE = [

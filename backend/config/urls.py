@@ -28,6 +28,8 @@ from apps.links.views import LinkViewSet, redirect_link
 from apps.mail.views import EmailMessageViewSet
 from apps.mailboxes.views import MailboxViewSet
 from apps.notifications.views import TelegramConfigViewSet
+from apps.protected_content.views import ProtectedDocumentViewSet
+from apps.protected_content.public_views import view_asset, view_document
 from apps.proxies.views import ProxyViewSet
 from apps.rules.views import PlaceholderViewSet, ReplyTemplateViewSet, RuleViewSet
 from apps.security.views import SystemEventViewSet, change_password, posture
@@ -47,6 +49,7 @@ router.register("contacts", ContactViewSet)
 router.register("contact-lists", ContactListViewSet)
 router.register("senders", CampaignSenderViewSet)
 router.register("events", SystemEventViewSet)
+router.register("protected-content", ProtectedDocumentViewSet)
 router.register("workspaces", WorkspaceViewSet, basename="workspaces")
 
 urlpatterns = [
@@ -71,6 +74,10 @@ urlpatterns = [
     path("api/security/change-password/", change_password),
     path("api/invitations/accept/", accept_invitation),
     path("r/<slug:slug>/", redirect_link),
+    # Protected content gate. Public by design — opened from a link in an email;
+    # authorization is the per-document passcode + server-side gate, not a session.
+    path("g/<slug:slug>/asset/<int:asset_id>/", view_asset),
+    path("g/<slug:slug>/", view_document),
     # Campaign tracking. Public by design — these are opened from inside a delivered
     # email, so they authenticate with an unguessable token, not a session.
     path("t/o/<str:token>.png", track_open),

@@ -122,6 +122,52 @@ export const api = {
     remove: (id) => request(`/attachments/${id}/`, { method: "DELETE" }),
   },
 
+  protectedContent: {
+    list: () => request("/protected-content/").then(list),
+    // Inline HTML pages go as JSON; file uploads go as multipart (createFile).
+    create: (body) => request("/protected-content/", { method: "POST", body }),
+    createFile: (formData) => uploadFile("/protected-content/", formData),
+    update: (id, body) => request(`/protected-content/${id}/`, { method: "PATCH", body }),
+    updateFile: (id, formData) => uploadFile(`/protected-content/${id}/`, formData, "PATCH"),
+    remove: (id) => request(`/protected-content/${id}/`, { method: "DELETE" }),
+    revoke: (id) => request(`/protected-content/${id}/revoke/`, { method: "POST" }),
+    activate: (id) => request(`/protected-content/${id}/activate/`, { method: "POST" }),
+    resetViews: (id) => request(`/protected-content/${id}/reset-views/`, { method: "POST" }),
+    accessLog: (id) => request(`/protected-content/${id}/access-log/`),
+    // Returns the standalone protected .html as a Blob for the browser to save.
+    exportHtml: async (id, passcode) => {
+      const res = await fetch(`${BASE}/protected-content/${id}/export/`, {
+        method: "POST",
+        headers: authHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ passcode: passcode || "" }),
+      });
+      if (!res.ok) {
+        const err = new Error(`${res.status} ${res.statusText}`);
+        try { err.detail = await res.json(); } catch { err.detail = await res.text(); }
+        throw err;
+      }
+      const disp = res.headers.get("Content-Disposition") || "";
+      const m = disp.match(/filename="?([^"]+)"?/);
+      return { blob: await res.blob(), filename: m ? m[1] : "protected.html" };
+    },
+    exportBatch: async (ids, passcode) => {
+      const res = await fetch(`${BASE}/protected-content/export-batch/`, {
+        method: "POST",
+        headers: authHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ ids, passcode: passcode || "" }),
+      });
+      if (!res.ok) {
+        const err = new Error(`${res.status} ${res.statusText}`);
+        try { err.detail = await res.json(); } catch { err.detail = await res.text(); }
+        throw err;
+      }
+      return { blob: await res.blob(), filename: "protected-pages.zip" };
+    },
+    assets: (id) => request(`/protected-content/${id}/assets/`),
+    uploadAsset: (id, formData) => uploadFile(`/protected-content/${id}/assets/`, formData),
+    removeAsset: (id, assetId) => request(`/protected-content/${id}/assets/${assetId}/`, { method: "DELETE" }),
+  },
+
   // --- Campaigns ------------------------------------------------------------
   campaigns: {
     list: () => request("/campaigns/").then(list),
@@ -198,8 +244,8 @@ export const api = {
   },
 };
 
-async function uploadFile(path, formData) {
-  const res = await fetch(`${BASE}${path}`, { method: "POST", headers: authHeaders(), body: formData });
+async function uploadFile(path, formData, method = "POST") {
+  const res = await fetch(`${BASE}${path}`, { method, headers: authHeaders(), body: formData });
   if (!res.ok) {
     const err = new Error(`${res.status} ${res.statusText}`);
     try { err.detail = await res.json(); } catch { err.detail = await res.text(); }
