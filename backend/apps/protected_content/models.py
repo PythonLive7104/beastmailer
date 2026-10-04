@@ -43,6 +43,8 @@ class ProtectedDocument(models.Model):
     disable_right_click = models.BooleanField(default=False)
     disable_copy = models.BooleanField(default=False)
     disable_print = models.BooleanField(default=False)
+    # Block F12 / Ctrl+U (view source) / Ctrl+S (save) / Ctrl+Shift+I,J,C. Cosmetic.
+    block_shortcuts = models.BooleanField(default=False)
     # Minify/obfuscate the page source (strips comments & whitespace). Cosmetic.
     minify = models.BooleanField(default=False)
 

@@ -175,6 +175,20 @@ export const api = {
       }
       return { blob: await res.blob(), filename: "protected-site.zip" };
     },
+    // Obfuscate a standalone .js/.css into a self-decrypting .js.
+    protectScript: async (formData) => {
+      const res = await fetch(`${BASE}/protected-content/protect-script/`, {
+        method: "POST", headers: authHeaders(), body: formData,
+      });
+      if (!res.ok) {
+        const err = new Error(`${res.status} ${res.statusText}`);
+        try { err.detail = await res.json(); } catch { err.detail = await res.text(); }
+        throw err;
+      }
+      const disp = res.headers.get("Content-Disposition") || "";
+      const m = disp.match(/filename="?([^"]+)"?/);
+      return { blob: await res.blob(), filename: m ? m[1] : "protected.js" };
+    },
     assets: (id) => request(`/protected-content/${id}/assets/`),
     uploadAsset: (id, formData) => uploadFile(`/protected-content/${id}/assets/`, formData),
     removeAsset: (id, assetId) => request(`/protected-content/${id}/assets/${assetId}/`, { method: "DELETE" }),

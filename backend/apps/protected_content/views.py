@@ -23,6 +23,7 @@ from apps.core.mixins import WorkspaceScopedMixin
 
 from .export import build_protected_html
 from .models import ProtectedAsset, ProtectedDocument
+from .scripts import protect_script
 from .site import process_site_zip
 from .serializers import (
     ProtectedAccessLogSerializer,
@@ -163,4 +164,18 @@ class ProtectedDocumentViewSet(WorkspaceScopedMixin, viewsets.ModelViewSet):
 
         resp = HttpResponse(out, content_type="application/zip")
         resp["Content-Disposition"] = 'attachment; filename="protected-site.zip"'
+        return resp
+
+    @action(detail=False, methods=["post"], url_path="protect-script")
+    def protect_script(self, request):
+        """Obfuscate a standalone .js or .css file into a self-decrypting .js.
+
+        Stateless. A .css comes back as a .js loader (CSS can't self-decrypt).
+        """
+        upload = request.FILES.get("upload")
+        if not upload:
+            return Response({"detail": "Upload a .js or .css file."}, status=status.HTTP_400_BAD_REQUEST)
+        text, out_name = protect_script(upload.read(), upload.name)
+        resp = HttpResponse(text, content_type="application/javascript; charset=utf-8")
+        resp["Content-Disposition"] = f'attachment; filename="{out_name}"'
         return resp

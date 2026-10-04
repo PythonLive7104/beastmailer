@@ -33,7 +33,8 @@ def _derive_key(passcode: str, salt: bytes) -> bytes:
     return kdf.derive(passcode.encode("utf-8"))
 
 
-def deterrents_js(disable_right_click=False, disable_copy=False, disable_print=False) -> str:
+def deterrents_js(disable_right_click=False, disable_copy=False, disable_print=False,
+                  block_shortcuts=False) -> str:
     bits = []
     if disable_right_click:
         bits.append("document.addEventListener('contextmenu',e=>e.preventDefault());")
@@ -43,11 +44,19 @@ def deterrents_js(disable_right_click=False, disable_copy=False, disable_print=F
     if disable_print:
         bits.append("window.addEventListener('beforeprint',()=>{document.body.style.display='none';});")
         bits.append("window.addEventListener('afterprint',()=>{document.body.style.display='';});")
+    if block_shortcuts:
+        # F12, Ctrl+U (view source), Ctrl+S (save), Ctrl+Shift+I/J/C (devtools).
+        bits.append(
+            "document.addEventListener('keydown',e=>{var k=(e.key||'').toLowerCase();"
+            "if(k==='f12'||(e.ctrlKey&&(k==='u'||k==='s'))||(e.ctrlKey&&e.shiftKey&&"
+            "(k==='i'||k==='j'||k==='c'))){e.preventDefault();e.stopPropagation();}});"
+        )
     return "".join(bits)
 
 
 def _deterrent_js(doc) -> str:
-    return deterrents_js(doc.disable_right_click, doc.disable_copy, doc.disable_print)
+    return deterrents_js(doc.disable_right_click, doc.disable_copy, doc.disable_print,
+                         doc.block_shortcuts)
 
 
 def encrypt_html_document(plaintext: bytes, title: str, passcode: str = "",
