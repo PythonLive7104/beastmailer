@@ -15,8 +15,19 @@ const BLANK = {
   disable_right_click: false,
   disable_copy: false,
   disable_print: false,
+  minify: false,
+  wrong_passcode_action: "prompt",
   is_active: true,
 };
+
+// Reusable helper: turn a Blob into a browser download.
+function saveBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
 
 // Trim a stored ISO timestamp down to what <input type="datetime-local"> expects.
 const toLocalInput = (iso) => (iso ? iso.slice(0, 16) : "");
@@ -27,6 +38,8 @@ export default function Protected() {
   const [file, setFile] = useState(null);
   const [assetsFor, setAssetsFor] = useState(null);
   const [logFor, setLogFor] = useState(null);
+  const [exportFor, setExportFor] = useState(null);
+  const [batchOpen, setBatchOpen] = useState(false);
   const toast = useToast();
 
   const load = () => api.protectedContent.list().then(setRows);
@@ -62,6 +75,7 @@ export default function Protected() {
         fd.append("disable_right_click", String(e.disable_right_click));
         fd.append("disable_copy", String(e.disable_copy));
         fd.append("disable_print", String(e.disable_print));
+        fd.append("wrong_passcode_action", e.wrong_passcode_action);
         fd.append("is_active", String(e.is_active));
         if (e.id) await api.protectedContent.updateFile(e.id, fd);
         else await api.protectedContent.createFile(fd);
@@ -74,6 +88,8 @@ export default function Protected() {
           disable_right_click: e.disable_right_click,
           disable_copy: e.disable_copy,
           disable_print: e.disable_print,
+          minify: e.minify,
+          wrong_passcode_action: e.wrong_passcode_action,
           is_active: e.is_active,
         };
         if (e.kind === "page" && e.html) body.html = e.html;
@@ -116,6 +132,9 @@ export default function Protected() {
       />
       <div className="section-head">
         <div className="spacer" />
+        {rows.some((r) => r.kind === "page") && (
+          <button className="btn" onClick={() => setBatchOpen(true)}><Icon.download /> Batch export</button>
+        )}
         <button className="btn btn-primary" onClick={openNew}><Icon.plus /> New protected content</button>
       </div>
 
@@ -141,6 +160,7 @@ export default function Protected() {
                   <td><span className={`badge ${d.is_active ? "badge-sent" : "badge-neutral"}`}>{d.is_active ? "active" : "revoked"}</span></td>
                   <td>
                     <div className="row" style={{ justifyContent: "flex-end", gap: 6 }}>
+                      {d.kind === "page" && <button className="btn btn-sm btn-ghost" title="Export protected .html" onClick={() => setExportFor(d)}><Icon.download /></button>}
                       {d.kind === "page" && <button className="btn btn-sm btn-ghost" title="Assets" onClick={() => setAssetsFor(d)}><Icon.attachments /></button>}
                       <button className="btn btn-sm btn-ghost" title="Access log" onClick={() => setLogFor(d)}><Icon.listeners /></button>
                       <button className="btn btn-sm btn-ghost" title={d.is_active ? "Revoke" : "Re-enable"} onClick={() => toggleActive(d)}><Icon.security /></button>
@@ -197,7 +217,19 @@ export default function Protected() {
           </div>
 
           {editing.requires_passcode && (
-            <div className="row"><Switch checked={editing.clear_passcode} onChange={(v) => setEditing({ ...editing, clear_passcode: v })} /><span className="page-sub">Remove passcode</span></div>
+            <div className="field-row">
+              <Field label="On a wrong passcode (hosted link)">
+                <select className="input" value={editing.wrong_passcode_action}
+                  onChange={(e) => setEditing({ ...editing, wrong_passcode_action: e.target.value })}>
+                  <option value="prompt">Show the prompt again with an error</option>
+                  <option value="blank">Display a blank page</option>
+                  <option value="back">Send the visitor back</option>
+                </select>
+              </Field>
+              <Field label=" ">
+                <label className="row" style={{ gap: 6, paddingTop: 8 }}><Switch checked={editing.clear_passcode} onChange={(v) => setEditing({ ...editing, clear_passcode: v })} /><span className="page-sub">Remove passcode</span></label>
+              </Field>
+            </div>
           )}
 
           <div className="field-row">
@@ -216,6 +248,7 @@ export default function Protected() {
               <label className="row" style={{ gap: 6 }}><Switch checked={editing.disable_right_click} onChange={(v) => setEditing({ ...editing, disable_right_click: v })} /><span className="page-sub">No right-click</span></label>
               <label className="row" style={{ gap: 6 }}><Switch checked={editing.disable_copy} onChange={(v) => setEditing({ ...editing, disable_copy: v })} /><span className="page-sub">No copy/select</span></label>
               <label className="row" style={{ gap: 6 }}><Switch checked={editing.disable_print} onChange={(v) => setEditing({ ...editing, disable_print: v })} /><span className="page-sub">No print</span></label>
+              {editing.kind === "page" && <label className="row" style={{ gap: 6 }}><Switch checked={editing.minify} onChange={(v) => setEditing({ ...editing, minify: v })} /><span className="page-sub">Minify source</span></label>}
             </div>
           </Field>
 
@@ -225,7 +258,57 @@ export default function Protected() {
 
       {assetsFor && <AssetsModal doc={assetsFor} onClose={() => setAssetsFor(null)} copy={copy} toast={toast} />}
       {logFor && <LogModal doc={logFor} onClose={() => setLogFor(null)} />}
+      {exportFor && <ExportModal doc={exportFor} onClose={() => setExportFor(null)} toast={toast} />}
+      {batchOpen && <BatchExportModal pages={rows.filter((r) => r.kind === "page")} onClose={() => setBatchOpen(false)} toast={toast} />}
     </div>
+  );
+}
+
+function BatchExportModal({ pages, onClose, toast }) {
+  const [selected, setSelected] = useState(() => new Set(pages.map((p) => p.id)));
+  const [passcode, setPasscode] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const toggle = (id) => {
+    const next = new Set(selected);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    setSelected(next);
+  };
+
+  const run = async () => {
+    const ids = [...selected];
+    if (!ids.length) { toast("Select at least one page", "err"); return; }
+    setBusy(true);
+    try {
+      const { blob, filename } = await api.protectedContent.exportBatch(ids, passcode);
+      saveBlob(blob, filename);
+      toast("Batch exported");
+      onClose();
+    } catch (e) { toast(`Batch export failed: ${JSON.stringify(e.detail)}`, "err"); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <Modal title="Batch export protected .html" onClose={onClose}
+      footer={<>
+        <button className="btn" onClick={onClose}>Cancel</button>
+        <button className="btn btn-primary" onClick={run} disabled={busy}>{busy ? "Building…" : `Download .zip (${selected.size})`}</button>
+      </>}>
+      <p className="page-sub">Encrypts each selected page into its own standalone HTML file and downloads them as a .zip. One passcode protects every file in the batch.</p>
+      <Field label="Passcode for all files (recommended)">
+        <input className="input" type="text" value={passcode} onChange={(e) => setPasscode(e.target.value)} placeholder="viewers type this to unlock" />
+      </Field>
+      <Field label="Pages">
+        <div style={{ maxHeight: 220, overflowY: "auto" }}>
+          {pages.map((p) => (
+            <label key={p.id} className="row" style={{ gap: 8, padding: "4px 0" }}>
+              <input type="checkbox" checked={selected.has(p.id)} onChange={() => toggle(p.id)} />
+              <span>{p.name}</span>
+            </label>
+          ))}
+        </div>
+      </Field>
+    </Modal>
   );
 }
 
@@ -277,6 +360,40 @@ function AssetsModal({ doc, onClose, copy, toast }) {
           </tbody>
         </table>
       )}
+    </Modal>
+  );
+}
+
+function ExportModal({ doc, onClose, toast }) {
+  const [passcode, setPasscode] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const download = async () => {
+    setBusy(true);
+    try {
+      const { blob, filename } = await api.protectedContent.exportHtml(doc.id, passcode);
+      saveBlob(blob, filename);
+      toast("Protected file downloaded");
+      onClose();
+    } catch (e) { toast(`Export failed: ${JSON.stringify(e.detail)}`, "err"); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <Modal title={`Export protected .html — ${doc.name}`} onClose={onClose}
+      footer={<>
+        <button className="btn" onClick={onClose}>Cancel</button>
+        <button className="btn btn-primary" onClick={download} disabled={busy}>{busy ? "Building…" : "Download .html"}</button>
+      </>}>
+      <p className="page-sub">Downloads a self-contained HTML file you can host on any server. The page is encrypted with AES-256; the viewer enters the passcode to unlock it. The passcode is never stored in the file.</p>
+      <Field label="Export passcode (recommended)">
+        <input className="input" type="text" value={passcode} onChange={(e) => setPasscode(e.target.value)} placeholder="viewers type this to unlock" autoFocus />
+      </Field>
+      <p className="page-sub" style={{ marginTop: 8 }}>
+        {passcode
+          ? "Strong: without this passcode the content cannot be read, even by someone who downloads the file."
+          : "⚠ No passcode: the file opens with no prompt and its source can be recovered — this is obfuscation only. Add a passcode for real protection."}
+      </p>
     </Modal>
   );
 }

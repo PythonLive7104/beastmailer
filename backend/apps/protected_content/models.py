@@ -43,6 +43,19 @@ class ProtectedDocument(models.Model):
     disable_right_click = models.BooleanField(default=False)
     disable_copy = models.BooleanField(default=False)
     disable_print = models.BooleanField(default=False)
+    # Minify/obfuscate the page source (strips comments & whitespace). Cosmetic.
+    minify = models.BooleanField(default=False)
+
+    # What the hosted viewer does on a wrong passcode (Protware parity).
+    WRONG_PROMPT = "prompt"
+    WRONG_BLANK = "blank"
+    WRONG_BACK = "back"
+    WRONG_CHOICES = [
+        (WRONG_PROMPT, "Show the prompt again with an error"),
+        (WRONG_BLANK, "Display a blank page"),
+        (WRONG_BACK, "Send the visitor back"),
+    ]
+    wrong_passcode_action = models.CharField(max_length=8, choices=WRONG_CHOICES, default=WRONG_PROMPT)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

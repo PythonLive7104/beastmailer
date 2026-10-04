@@ -11,6 +11,7 @@ from django.utils.html import escape
 from django.views.decorators.csrf import csrf_exempt
 
 from .gate import check_access, check_asset_access
+from .htmlmin import minify_html
 from .models import ProtectedAccessLog, ProtectedAsset, ProtectedDocument
 
 # Friendly messages per denial outcome.
@@ -72,7 +73,10 @@ def _serve_payload(doc) -> HttpResponse:
         resp = HttpResponse(payload, content_type=doc.content_type or "application/octet-stream")
         resp["Content-Disposition"] = f'attachment; filename="{escape(doc.name)}"'
         return resp
-    html = payload.decode("utf-8", errors="replace") + _deterrent_script(doc)
+    html = payload.decode("utf-8", errors="replace")
+    if doc.minify:
+        html = minify_html(html)
+    html += _deterrent_script(doc)
     return HttpResponse(html, content_type="text/html; charset=utf-8")
 
 
@@ -90,8 +94,18 @@ def view_document(request, slug):
         return _serve_payload(doc)
 
     if outcome == ProtectedAccessLog.OUTCOME_DENIED_PASSCODE:
-        error = "Incorrect passcode." if request.method == "POST" else ""
-        return _passcode_form(doc, error)
+        # A wrong attempt (POST) honors the configured action; a first view (GET)
+        # always just shows the prompt.
+        if request.method == "POST":
+            if doc.wrong_passcode_action == ProtectedDocument.WRONG_BLANK:
+                return HttpResponse("", content_type="text/html; charset=utf-8", status=401)
+            if doc.wrong_passcode_action == ProtectedDocument.WRONG_BACK:
+                return HttpResponse(
+                    "<!doctype html><script>history.back()</script>",
+                    content_type="text/html; charset=utf-8", status=401,
+                )
+            return _passcode_form(doc, "Incorrect passcode.")
+        return _passcode_form(doc, "")
 
     title, msg = _DENIAL_MESSAGES.get(outcome, ("Access denied", "You can't view this content."))
     return _page(title, f"<h1>{escape(title)}</h1><p>{escape(msg)}</p>", status=403)

@@ -28,6 +28,7 @@ class ProtectedDocumentSerializer(serializers.ModelSerializer):
             "content_type", "size", "requires_passcode",
             "expires_at", "max_views", "view_count", "allowed_referrers", "is_active",
             "disable_right_click", "disable_copy", "disable_print",
+            "minify", "wrong_passcode_action",
             "public_path", "created_at", "updated_at",
         ]
         read_only_fields = ["content_type", "size", "view_count", "created_at", "updated_at"]
