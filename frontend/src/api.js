@@ -281,4 +281,10 @@ async function uploadFile(path, formData, method = "POST") {
 }
 
 // Base URL of the backend (without the /api suffix) for building media/redirect links.
-export const SERVER_ORIGIN = BASE.replace(/\/api\/?$/, "");
+// Strip the trailing /api to get the backend origin for building media/redirect
+// and protected-content links. In production VITE_API_BASE is the relative "/api",
+// which leaves this empty — fall back to the current site origin so copied links
+// (e.g. /g/<slug>/ pasted into an email) carry the real domain.
+export const SERVER_ORIGIN =
+  BASE.replace(/\/api\/?$/, "") ||
+  (typeof window !== "undefined" ? window.location.origin : "");
