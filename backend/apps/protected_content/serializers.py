@@ -25,13 +25,13 @@ class ProtectedDocumentSerializer(serializers.ModelSerializer):
         fields = [
             "id", "name", "slug", "kind",
             "upload", "html", "passcode", "clear_passcode",
-            "content_type", "size", "requires_passcode",
+            "content_type", "original_filename", "size", "requires_passcode",
             "expires_at", "max_views", "view_count", "allowed_referrers", "is_active",
             "disable_right_click", "disable_copy", "disable_print",
             "block_shortcuts", "minify", "wrong_passcode_action",
             "public_path", "created_at", "updated_at",
         ]
-        read_only_fields = ["content_type", "size", "view_count", "created_at", "updated_at"]
+        read_only_fields = ["content_type", "original_filename", "size", "view_count", "created_at", "updated_at"]
         extra_kwargs = {
             # Slug is optional on input; we generate an unguessable one if omitted.
             "slug": {"required": False},
@@ -73,6 +73,7 @@ class ProtectedDocumentSerializer(serializers.ModelSerializer):
         if upload is not None:
             instance.kind = ProtectedDocument.KIND_FILE
             instance.content_type = getattr(upload, "content_type", "") or "application/octet-stream"
+            instance.original_filename = getattr(upload, "name", "") or ""
             instance.set_payload(upload.read())
         elif html is not None:
             instance.kind = ProtectedDocument.KIND_PAGE

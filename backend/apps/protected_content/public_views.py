@@ -4,6 +4,10 @@ These live outside /api/ (like the /r/ and /t/ tracking routes) because they are
 opened directly from a link in an email. There is no session; authorization is
 the gate in gate.py plus the per-document passcode.
 """
+import mimetypes
+import os
+import re
+
 from django.db.models import F
 from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404
@@ -58,13 +62,29 @@ def _deterrent_script(doc) -> str:
     return f"<script>{js}</script>" if js else ""
 
 
+def _download_filename(doc) -> str:
+    """A safe download filename that keeps the real extension.
+
+    Prefers the original uploaded filename; otherwise uses the display name and
+    appends an extension guessed from the content type, so the file stays usable.
+    """
+    name = doc.original_filename or doc.name or "download"
+    name = os.path.basename(name).replace('"', "")
+    if not os.path.splitext(name)[1]:
+        ext = mimetypes.guess_extension(doc.content_type.split(";")[0].strip()) if doc.content_type else None
+        if ext:
+            name += ext
+    # Strip anything odd from the header value.
+    return re.sub(r"[\r\n]", "", name)
+
+
 def _serve_payload(doc) -> HttpResponse:
     # Count the view atomically, then hand over the decrypted payload.
     ProtectedDocument.objects.filter(pk=doc.pk).update(view_count=F("view_count") + 1)
     payload = doc.get_payload()
     if doc.kind == ProtectedDocument.KIND_FILE:
         resp = HttpResponse(payload, content_type=doc.content_type or "application/octet-stream")
-        resp["Content-Disposition"] = f'attachment; filename="{escape(doc.name)}"'
+        resp["Content-Disposition"] = f'attachment; filename="{_download_filename(doc)}"'
         return resp
     html = payload.decode("utf-8", errors="replace")
     if doc.minify:

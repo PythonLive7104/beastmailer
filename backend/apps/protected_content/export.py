@@ -12,6 +12,7 @@ mode): the page opens with no prompt, but anyone can read the source — that is
 obfuscation only, matching Protware's password-less pages. Prefer a passcode.
 """
 import base64
+import gzip
 import json
 import os
 
@@ -60,12 +61,22 @@ def _deterrent_js(doc) -> str:
 
 
 def encrypt_html_document(plaintext: bytes, title: str, passcode: str = "",
-                          expires_ms: int = 0, deterrents: str = "") -> str:
+                          expires_ms: int = 0, deterrents: str = "", compress: bool = True) -> str:
     """Core: wrap raw HTML bytes into a standalone, encrypted, self-contained file.
 
     Independent of any model, so it serves both single-page export and whole-site
-    zip processing.
+    zip processing. HTML compresses well, so by default the payload is gzip'd
+    before encryption (the browser inflates it after decrypting) — this usually
+    makes the generated file smaller than the original despite base64 overhead.
+    Compression is skipped when it would not actually reduce the payload.
     """
+    compressed = False
+    if compress:
+        gz = gzip.compress(plaintext, 9)
+        if len(gz) < len(plaintext):
+            plaintext = gz
+            compressed = True
+
     salt = os.urandom(16)
     iv = os.urandom(12)
 
@@ -86,6 +97,7 @@ def encrypt_html_document(plaintext: bytes, title: str, passcode: str = "",
         "iter": PBKDF2_ITERATIONS,
         "keyless": keyless_key_b64,  # "" when a passcode is required
         "expires": int(expires_ms) if expires_ms else 0,  # client-side expiry (epoch ms)
+        "gz": compressed,  # payload is gzip'd inside the ciphertext
         "deterrents": deterrents,
         "title": title,
     }
@@ -147,7 +159,13 @@ button{margin-top:14px;width:100%;padding:11px;border:0;border-radius:8px;backgr
 <script>
 const CFG = /*__CONFIG__*/;
 const dec = (b64) => Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+async function gunzip(bytes){
+  const ds = new DecompressionStream('gzip');
+  const stream = new Blob([bytes]).stream().pipeThrough(ds);
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
 async function reveal(bytes){
+  if (CFG.gz) bytes = await gunzip(bytes);
   const html = new TextDecoder().decode(bytes);
   document.open(); document.write(html); document.close();
   if (CFG.deterrents) { const s=document.createElement('script'); s.textContent=CFG.deterrents; document.body.appendChild(s); }
@@ -175,13 +193,13 @@ function expired(){
   document.title = CFG.title || 'Protected';
   if (CFG.expires && Date.now() > CFG.expires) { expired(); return; }
   if (CFG.keyless) {            // no passcode required
-    try { reveal(await unlock('')); } catch(e){ document.getElementById('err').textContent='Could not load content.'; }
+    try { await reveal(await unlock('')); } catch(e){ document.getElementById('err').textContent='Could not load content.'; }
     return;
   }
   document.getElementById('f').addEventListener('submit', async (ev) => {
     ev.preventDefault();
     const err = document.getElementById('err'); err.textContent='';
-    try { reveal(await unlock(document.getElementById('pc').value)); }
+    try { const d = await unlock(document.getElementById('pc').value); await reveal(d); }
     catch(e){ err.textContent='Incorrect passcode.'; }
   });
 })();
