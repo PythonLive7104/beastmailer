@@ -1,0 +1,343 @@
+"""Tests for the protected-content gate and the encrypted export.
+
+The export is the part worth pinning down: it is the only place where protected
+content leaves this server as a file, so a regression there silently ships
+plaintext. Each test that claims something is encrypted proves it by decrypting
+the result the same way the browser does, and by asserting the plaintext canary
+is absent from the delivered bytes.
+"""
+import base64
+import gzip
+import json
+import re
+
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from django.test import TestCase
+from django.utils import timezone
+
+from apps.workspaces.models import Workspace
+
+from .export import build_protected_export, parse_domains
+from .gate import check_access
+from .models import ProtectedAccessLog, ProtectedDocument
+
+CANARY = b"%PDF-1.4 TOP-SECRET-CANARY confidential contents " + bytes(range(256)) * 4
+
+
+def extract_config(html: str) -> dict:
+    """Pull the embedded CFG object out of an exported file."""
+    return json.loads(re.search(r"const CFG = (\{.*\});", html).group(1))
+
+
+def browser_decrypt(cfg: dict, passcode: str) -> bytes:
+    """Do exactly what the exported file's inline script does."""
+    salt = base64.b64decode(cfg["salt"])
+    if cfg["keyless"]:
+        key = base64.b64decode(cfg["keyless"])
+    else:
+        key = PBKDF2HMAC(
+            algorithm=hashes.SHA256(), length=32, salt=salt, iterations=cfg["iter"]
+        ).derive(passcode.encode())
+    plain = AESGCM(key).decrypt(base64.b64decode(cfg["iv"]), base64.b64decode(cfg["ct"]), None)
+    return gzip.decompress(plain) if cfg["gz"] else plain
+
+
+class ExportEncryptionTests(TestCase):
+    """A downloaded export must never contain the payload in the clear."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.ws = Workspace.objects.create(name="W")
+
+    def _file_doc(self, **kw):
+        doc = ProtectedDocument(
+            workspace=self.ws, kind=ProtectedDocument.KIND_FILE, name="Quarterly Report",
+            slug=kw.pop("slug", "filedoc"), content_type="application/pdf",
+            original_filename="q3-report.pdf", **kw,
+        )
+        doc.set_payload(CANARY)
+        doc.save()
+        return doc
+
+    def test_file_export_is_encrypted_and_round_trips(self):
+        html = build_protected_export(self._file_doc(), passcode="hunter2")
+
+        # The regression this guards: the payload used to be handed over in the clear.
+        self.assertNotIn(CANARY, html.encode("latin-1", "replace"))
+        self.assertNotIn("hunter2", html)
+
+        cfg = extract_config(html)
+        self.assertEqual(cfg["kind"], "file")
+        self.assertEqual(cfg["fname"], "q3-report.pdf")
+        self.assertEqual(cfg["mime"], "application/pdf")
+        self.assertEqual(cfg["keyless"], "")  # key is not in the file
+        self.assertEqual(browser_decrypt(cfg, "hunter2"), CANARY)
+
+    def test_wrong_passcode_cannot_decrypt(self):
+        cfg = extract_config(build_protected_export(self._file_doc(), passcode="right"))
+        with self.assertRaises(Exception):
+            browser_decrypt(cfg, "wrong")
+
+    def test_page_export_is_encrypted(self):
+        doc = ProtectedDocument(
+            workspace=self.ws, kind=ProtectedDocument.KIND_PAGE, name="Page", slug="pagedoc",
+        )
+        doc.set_payload(b"<h1>Hi</h1><p>page-canary</p>")
+        doc.save()
+
+        html = build_protected_export(doc, passcode="pw")
+        self.assertNotIn("page-canary", html)
+        cfg = extract_config(html)
+        self.assertEqual(cfg["kind"], "page")
+        self.assertIn(b"page-canary", browser_decrypt(cfg, "pw"))
+
+    def test_keyless_export_embeds_the_key(self):
+        """No passcode is obfuscation only — assert that, so nobody mistakes it."""
+        cfg = extract_config(build_protected_export(self._file_doc(), passcode=""))
+        self.assertNotEqual(cfg["keyless"], "")
+        self.assertEqual(browser_decrypt(cfg, ""), CANARY)
+
+    def test_restrictions_are_embedded(self):
+        doc = self._file_doc(
+            allowed_domains="example.com, https://www.partner.net/x",
+            block_offline=True, break_frames=True,
+        )
+        cfg = extract_config(build_protected_export(doc, passcode="pw"))
+        self.assertEqual(cfg["domains"], ["example.com", "partner.net"])
+        self.assertTrue(cfg["offline"])
+        self.assertTrue(cfg["frames"])
+
+
+class ParseDomainsTests(TestCase):
+    def test_strips_scheme_port_path_and_www(self):
+        self.assertEqual(
+            parse_domains("https://www.Example.com:8443/a/b, partner.net , "),
+            ["example.com", "partner.net"],
+        )
+
+    def test_blank_means_no_lock(self):
+        self.assertEqual(parse_domains(""), [])
+        self.assertEqual(parse_domains("  ,  "), [])
+
+
+class GateTests(TestCase):
+    """The server-side gate is the real enforcement; each rule gets a case."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.ws = Workspace.objects.create(name="W")
+
+    def _doc(self, **kw):
+        doc = ProtectedDocument(
+            workspace=self.ws, kind=ProtectedDocument.KIND_PAGE,
+            name="D", slug=kw.pop("slug", "gatedoc"), **kw,
+        )
+        doc.set_payload(b"<p>x</p>")
+        doc.save()
+        return doc
+
+    def _request(self, host="example.com", referer=""):
+        from django.test import RequestFactory
+
+        return RequestFactory().get("/g/gatedoc/", HTTP_HOST=host, HTTP_REFERER=referer)
+
+    def test_domain_lock_allows_listed_host_and_subdomain(self):
+        doc = self._doc(allowed_domains="example.com")
+        for host in ("example.com", "www.example.com", "docs.example.com"):
+            granted, outcome = check_access(doc, self._request(host=host))
+            self.assertTrue(granted, f"{host} should pass")
+
+    def test_domain_lock_blocks_other_hosts(self):
+        doc = self._doc(allowed_domains="example.com")
+        granted, outcome = check_access(doc, self._request(host="evil.test"))
+        self.assertFalse(granted)
+        self.assertEqual(outcome, ProtectedAccessLog.OUTCOME_DENIED_DOMAIN)
+
+    def test_blank_domain_lock_allows_anything(self):
+        doc = self._doc(allowed_domains="")
+        granted, _ = check_access(doc, self._request(host="anywhere.test"))
+        self.assertTrue(granted)
+
+    def test_expired_document_is_refused(self):
+        doc = self._doc(expires_at=timezone.now() - timezone.timedelta(minutes=1))
+        granted, outcome = check_access(doc, self._request())
+        self.assertFalse(granted)
+        self.assertEqual(outcome, ProtectedAccessLog.OUTCOME_EXPIRED)
+
+    def test_revoked_document_is_refused(self):
+        granted, outcome = check_access(self._doc(is_active=False), self._request())
+        self.assertFalse(granted)
+        self.assertEqual(outcome, ProtectedAccessLog.OUTCOME_INACTIVE)
+
+    def test_wrong_passcode_is_refused_and_logged(self):
+        doc = self._doc()
+        doc.set_passcode("open-sesame")
+        doc.save()
+        granted, outcome = check_access(doc, self._request(), passcode="nope")
+        self.assertFalse(granted)
+        self.assertEqual(outcome, ProtectedAccessLog.OUTCOME_DENIED_PASSCODE)
+        self.assertTrue(doc.access_logs.filter(
+            outcome=ProtectedAccessLog.OUTCOME_DENIED_PASSCODE).exists())
+        self.assertTrue(check_access(doc, self._request(), passcode="open-sesame")[0])
+
+    def test_first_view_does_not_log_a_denial(self):
+        """Merely opening the page and seeing the prompt is not an attempt."""
+        doc = self._doc()
+        doc.set_passcode("pw")
+        doc.save()
+        check_access(doc, self._request(), passcode=None)
+        self.assertFalse(doc.access_logs.filter(
+            outcome=ProtectedAccessLog.OUTCOME_DENIED_PASSCODE).exists())
+
+
+class ViewCapTests(TestCase):
+    """max_views must not be exceedable by concurrent requests."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.ws = Workspace.objects.create(name="W")
+
+    def _doc(self):
+        doc = ProtectedDocument(
+            workspace=self.ws, kind=ProtectedDocument.KIND_PAGE, name="D",
+            slug="capdoc", max_views=1,
+        )
+        doc.set_payload(b"<p>x</p>")
+        doc.save()
+        return doc
+
+    def test_only_one_claim_succeeds_for_a_single_view(self):
+        from .public_views import _claim_view
+
+        doc = self._doc()
+        # Two requests that both passed check_access (both read view_count == 0).
+        self.assertTrue(_claim_view(doc))
+        self.assertFalse(_claim_view(doc), "the cap was already taken")
+        doc.refresh_from_db()
+        self.assertEqual(doc.view_count, 1)
+
+    def test_unlimited_document_always_claims(self):
+        from .public_views import _claim_view
+
+        doc = self._doc()
+        doc.max_views = None
+        doc.save()
+        for _ in range(3):
+            self.assertTrue(_claim_view(doc))
+        doc.refresh_from_db()
+        self.assertEqual(doc.view_count, 3)
+
+
+class HostedDownloadTests(TestCase):
+    """The hosted gate decrypts for the visitor; that is the documented trade-off."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.ws = Workspace.objects.create(name="W")
+
+    def test_file_download_through_the_gate_keeps_its_filename(self):
+        doc = ProtectedDocument(
+            workspace=self.ws, kind=ProtectedDocument.KIND_FILE, name="Report",
+            slug="hosted", content_type="application/pdf", original_filename="q3 report.pdf",
+        )
+        doc.set_payload(CANARY)
+        doc.save()
+
+        resp = self.client.get("/g/hosted/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("q3 report.pdf", resp["Content-Disposition"])
+        # The gate's job is to hand the real file to an authorised visitor, so this
+        # body IS the plaintext. Use an export when the file itself must stay sealed.
+        self.assertEqual(resp.content, CANARY)
+
+    def test_break_frames_sets_headers(self):
+        doc = ProtectedDocument(
+            workspace=self.ws, kind=ProtectedDocument.KIND_PAGE, name="P",
+            slug="framed", break_frames=True,
+        )
+        doc.set_payload(b"<p>hi</p>")
+        doc.save()
+
+        resp = self.client.get("/g/framed/")
+        self.assertEqual(resp["X-Frame-Options"], "DENY")
+        self.assertIn("frame-ancestors 'none'", resp["Content-Security-Policy"])
+
+    def test_domain_lock_is_enforced_on_the_hosted_link(self):
+        doc = ProtectedDocument(
+            workspace=self.ws, kind=ProtectedDocument.KIND_PAGE, name="P",
+            slug="locked", allowed_domains="allowed.test",
+        )
+        doc.set_payload(b"<p>secret-body</p>")
+        doc.save()
+
+        denied = self.client.get("/g/locked/", HTTP_HOST="other.test")
+        self.assertEqual(denied.status_code, 403)
+        self.assertNotIn(b"secret-body", denied.content)
+
+        ok = self.client.get("/g/locked/", HTTP_HOST="allowed.test")
+        self.assertEqual(ok.status_code, 200)
+        self.assertIn(b"secret-body", ok.content)
+
+
+class ExportApiTests(TestCase):
+    """The export endpoint used to reject file documents outright with a 400."""
+
+    @classmethod
+    def setUpTestData(cls):
+        from django.contrib.auth import get_user_model
+        from rest_framework.authtoken.models import Token
+
+        from apps.workspaces.services import ensure_personal_workspace
+
+        user = get_user_model().objects.create_user(username="u", password="pw12345!x")
+        cls.ws = ensure_personal_workspace(user)
+        cls.token = Token.objects.create(user=user)
+
+    def _auth(self):
+        return {"HTTP_AUTHORIZATION": f"Token {self.token.key}"}
+
+    def _doc(self, kind, slug):
+        doc = ProtectedDocument(
+            workspace=self.ws, kind=kind, name="Doc", slug=slug,
+            content_type="application/pdf", original_filename="doc.pdf",
+        )
+        doc.set_payload(CANARY)
+        doc.save()
+        return doc
+
+    def test_export_of_a_file_returns_an_encrypted_wrapper(self):
+        doc = self._doc(ProtectedDocument.KIND_FILE, "apifile")
+        resp = self.client.post(
+            f"/api/protected-content/{doc.id}/export/",
+            {"passcode": "s3cret"}, content_type="application/json", **self._auth(),
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp["Content-Type"], "text/html; charset=utf-8")
+        self.assertIn(".html", resp["Content-Disposition"])
+
+        body = resp.content.decode()
+        self.assertNotIn(CANARY, resp.content)
+        cfg = extract_config(body)
+        self.assertEqual(cfg["kind"], "file")
+        self.assertEqual(browser_decrypt(cfg, "s3cret"), CANARY)
+
+    def test_batch_export_includes_files_and_pages(self):
+        f = self._doc(ProtectedDocument.KIND_FILE, "batchfile")
+        p = self._doc(ProtectedDocument.KIND_PAGE, "batchpage")
+        resp = self.client.post(
+            "/api/protected-content/export-batch/",
+            {"ids": [f.id, p.id], "passcode": "pw"},
+            content_type="application/json", **self._auth(),
+        )
+        self.assertEqual(resp.status_code, 200)
+
+        import io as _io
+        import zipfile
+
+        with zipfile.ZipFile(_io.BytesIO(resp.content)) as zf:
+            names = zf.namelist()
+            self.assertEqual(len(names), 2, names)
+            for name in names:
+                self.assertNotIn(CANARY, zf.read(name))

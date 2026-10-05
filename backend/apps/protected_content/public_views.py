@@ -4,9 +4,6 @@ These live outside /api/ (like the /r/ and /t/ tracking routes) because they are
 opened directly from a link in an email. There is no session; authorization is
 the gate in gate.py plus the per-document passcode.
 """
-import mimetypes
-import os
-import re
 
 from django.db.models import F
 from django.http import Http404, HttpResponse
@@ -14,8 +11,8 @@ from django.shortcuts import get_object_or_404
 from django.utils.html import escape
 from django.views.decorators.csrf import csrf_exempt
 
-from .export import _deterrent_js
-from .gate import check_access, check_asset_access
+from .export import _deterrent_js, export_filename
+from .gate import check_access, check_asset_access, log
 from .htmlmin import minify_html
 from .models import ProtectedAccessLog, ProtectedAsset, ProtectedDocument
 
@@ -25,6 +22,7 @@ _DENIAL_MESSAGES = {
     ProtectedAccessLog.OUTCOME_EXPIRED: ("Expired", "This content has expired and can no longer be viewed."),
     ProtectedAccessLog.OUTCOME_OVER_LIMIT: ("View limit reached", "This content has reached its maximum number of views."),
     ProtectedAccessLog.OUTCOME_DENIED_REFERRER: ("Access denied", "This content can only be opened from an authorized site."),
+    ProtectedAccessLog.OUTCOME_DENIED_DOMAIN: ("Access denied", "This content is not licensed to run on this domain."),
 }
 
 _SHELL = """<!doctype html><html lang="en"><head><meta charset="utf-8">
@@ -62,35 +60,47 @@ def _deterrent_script(doc) -> str:
     return f"<script>{js}</script>" if js else ""
 
 
-def _download_filename(doc) -> str:
-    """A safe download filename that keeps the real extension.
+def _safe_filename(doc) -> str:
+    """The download filename, with anything illegal in a header stripped out."""
+    return export_filename(doc).translate({ord(c): None for c in '\r\n"'})
 
-    Prefers the original uploaded filename; otherwise uses the display name and
-    appends an extension guessed from the content type, so the file stays usable.
+
+def _claim_view(doc) -> bool:
+    """Reserve one view for this request. False if the cap was just taken.
+
+    check_access() reads view_count, so on its own it lets N concurrent requests
+    past a max_views=1 document. The claim is a single conditional UPDATE, so the
+    database picks the winner and the loser is turned away.
     """
-    name = doc.original_filename or doc.name or "download"
-    name = os.path.basename(name).replace('"', "")
-    if not os.path.splitext(name)[1]:
-        ext = mimetypes.guess_extension(doc.content_type.split(";")[0].strip()) if doc.content_type else None
-        if ext:
-            name += ext
-    # Strip anything odd from the header value.
-    return re.sub(r"[\r\n]", "", name)
+    qs = ProtectedDocument.objects.filter(pk=doc.pk)
+    if doc.max_views is not None:
+        qs = qs.filter(view_count__lt=doc.max_views)
+    return qs.update(view_count=F("view_count") + 1) == 1
+
+
+def _frame_headers(doc, resp: HttpResponse) -> HttpResponse:
+    """Refuse framing at the header level when break_frames is on.
+
+    Stronger than the JS frame-breaker in an exported file, which a sandboxed
+    iframe can neutralise — the browser enforces this before any script runs.
+    """
+    if doc.break_frames:
+        resp["X-Frame-Options"] = "DENY"
+        resp["Content-Security-Policy"] = "frame-ancestors 'none'"
+    return resp
 
 
 def _serve_payload(doc) -> HttpResponse:
-    # Count the view atomically, then hand over the decrypted payload.
-    ProtectedDocument.objects.filter(pk=doc.pk).update(view_count=F("view_count") + 1)
     payload = doc.get_payload()
     if doc.kind == ProtectedDocument.KIND_FILE:
         resp = HttpResponse(payload, content_type=doc.content_type or "application/octet-stream")
-        resp["Content-Disposition"] = f'attachment; filename="{_download_filename(doc)}"'
-        return resp
+        resp["Content-Disposition"] = f'attachment; filename="{_safe_filename(doc)}"'
+        return _frame_headers(doc, resp)
     html = payload.decode("utf-8", errors="replace")
     if doc.minify:
         html = minify_html(html)
     html += _deterrent_script(doc)
-    return HttpResponse(html, content_type="text/html; charset=utf-8")
+    return _frame_headers(doc, HttpResponse(html, content_type="text/html; charset=utf-8"))
 
 
 @csrf_exempt
@@ -104,7 +114,11 @@ def view_document(request, slug):
     granted, outcome = check_access(doc, request, passcode=passcode)
 
     if granted:
-        return _serve_payload(doc)
+        if _claim_view(doc):
+            return _serve_payload(doc)
+        # Lost the race for the last view against a concurrent request.
+        log(doc, request, ProtectedAccessLog.OUTCOME_OVER_LIMIT)
+        outcome = ProtectedAccessLog.OUTCOME_OVER_LIMIT
 
     if outcome == ProtectedAccessLog.OUTCOME_DENIED_PASSCODE:
         # A wrong attempt (POST) honors the configured action; a first view (GET)

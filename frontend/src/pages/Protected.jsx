@@ -12,6 +12,9 @@ const BLANK = {
   expires_at: "",
   max_views: "",
   allowed_referrers: "",
+  allowed_domains: "",
+  block_offline: false,
+  break_frames: false,
   disable_right_click: false,
   disable_copy: false,
   disable_print: false,
@@ -75,6 +78,9 @@ export default function Protected() {
         if (e.max_views !== "") fd.append("max_views", e.max_views);
         if (e.expires_at) fd.append("expires_at", e.expires_at);
         fd.append("allowed_referrers", e.allowed_referrers || "");
+        fd.append("allowed_domains", e.allowed_domains || "");
+        fd.append("block_offline", String(e.block_offline));
+        fd.append("break_frames", String(e.break_frames));
         fd.append("disable_right_click", String(e.disable_right_click));
         fd.append("disable_copy", String(e.disable_copy));
         fd.append("disable_print", String(e.disable_print));
@@ -87,6 +93,9 @@ export default function Protected() {
         const body = {
           name: e.name,
           allowed_referrers: e.allowed_referrers || "",
+          allowed_domains: e.allowed_domains || "",
+          block_offline: e.block_offline,
+          break_frames: e.break_frames,
           max_views: e.max_views === "" ? null : Number(e.max_views),
           expires_at: e.expires_at || null,
           disable_right_click: e.disable_right_click,
@@ -133,7 +142,7 @@ export default function Protected() {
     <div className="grid">
       <PageIntro
         id="protected"
-        lead="Protect a page or file and share it as a link. The content is encrypted and only handed over after your rules pass — passcode, expiry, view limit and allowed sites — all enforced on the server, with every open recorded."
+        lead="Protect a page or file two ways. A hosted link keeps the content on this server and hands it over only after your rules pass — passcode, expiry, view limit, referrer and domain lock — with every open recorded. An export is a standalone, AES-256-encrypted .html you can host or email: the payload stays encrypted inside the file and only the passcode opens it."
       />
       <div className="section-head">
         <div className="spacer" />
@@ -168,7 +177,7 @@ export default function Protected() {
                   <td>
                     <div className="row" style={{ justifyContent: "flex-end", gap: 6 }}>
                       <button className="btn btn-sm btn-ghost" title={d.kind === "file" ? "Open / download" : "Open link"} onClick={() => window.open(url, "_blank")}><Icon.links /></button>
-                      {d.kind === "page" && <button className="btn btn-sm btn-ghost" title="Export protected .html" onClick={() => setExportFor(d)}><Icon.download /></button>}
+                      <button className="btn btn-sm btn-ghost" title={d.kind === "file" ? "Export encrypted .html wrapper" : "Export protected .html"} onClick={() => setExportFor(d)}><Icon.download /></button>
                       {d.kind === "page" && <button className="btn btn-sm btn-ghost" title="Assets" onClick={() => setAssetsFor(d)}><Icon.attachments /></button>}
                       <button className="btn btn-sm btn-ghost" title="Access log" onClick={() => setLogFor(d)}><Icon.listeners /></button>
                       <button className="btn btn-sm btn-ghost" title={d.is_active ? "Revoke" : "Re-enable"} onClick={() => toggleActive(d)}><Icon.security /></button>
@@ -208,9 +217,17 @@ export default function Protected() {
                 placeholder="<h1>Hello</h1>" />
             </Field>
           ) : (
-            <Field label={editing.id ? "Replace file (leave empty to keep current)" : "File"}>
-              <input className="input" type="file" onChange={(e) => setFile(e.target.files?.[0] || null)} />
-            </Field>
+            <>
+              <Field label={editing.id ? "Replace file (leave empty to keep current)" : "File"}>
+                <input className="input" type="file" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+              </Field>
+              <p className="page-sub" style={{ marginTop: -4 }}>
+                Stored encrypted. The <b>hosted link</b> decrypts and hands over the real file once your
+                rules pass — that is what a gate is for, so the download itself is the original.
+                To send a file that stays encrypted in transit and at rest, use <b>Export</b>: the
+                recipient gets a self-decrypting .html and needs the passcode to get the file out.
+              </p>
+            </>
           )}
 
           <div className="field-row">
@@ -253,6 +270,19 @@ export default function Protected() {
             </Field>
           </div>
 
+          <Field label="Domain lock (comma-separated, optional) — enforced on the hosted link and baked into exports">
+            <input className="input" value={editing.allowed_domains}
+              onChange={(e) => setEditing({ ...editing, allowed_domains: e.target.value })}
+              placeholder="example.com, partner.net — blank = runs anywhere" />
+          </Field>
+
+          <Field label="Usage restrictions">
+            <div className="row" style={{ gap: 18, flexWrap: "wrap" }}>
+              <label className="row" style={{ gap: 6 }}><Switch checked={editing.block_offline} onChange={(v) => setEditing({ ...editing, block_offline: v })} /><span className="page-sub">No offline use (exports refuse to run from a local copy)</span></label>
+              <label className="row" style={{ gap: 6 }}><Switch checked={editing.break_frames} onChange={(v) => setEditing({ ...editing, break_frames: v })} /><span className="page-sub">Break out of frames</span></label>
+            </div>
+          </Field>
+
           <Field label="Browser deterrents (cosmetic — easily bypassed, not real protection)">
             <div className="row" style={{ gap: 18, flexWrap: "wrap" }}>
               <label className="row" style={{ gap: 6 }}><Switch checked={editing.disable_right_click} onChange={(v) => setEditing({ ...editing, disable_right_click: v })} /><span className="page-sub">No right-click</span></label>
@@ -270,7 +300,7 @@ export default function Protected() {
       {assetsFor && <AssetsModal doc={assetsFor} onClose={() => setAssetsFor(null)} copy={copy} toast={toast} />}
       {logFor && <LogModal doc={logFor} onClose={() => setLogFor(null)} />}
       {exportFor && <ExportModal doc={exportFor} onClose={() => setExportFor(null)} toast={toast} />}
-      {batchOpen && <BatchExportModal pages={rows.filter((r) => r.kind === "page")} onClose={() => setBatchOpen(false)} toast={toast} />}
+      {batchOpen && <BatchExportModal pages={rows} onClose={() => setBatchOpen(false)} toast={toast} />}
       {siteOpen && <SiteModal onClose={() => setSiteOpen(false)} toast={toast} />}
       {scriptOpen && <ScriptModal onClose={() => setScriptOpen(false)} toast={toast} />}
     </div>
@@ -319,6 +349,9 @@ function SiteModal({ onClose, toast }) {
   const [passcode, setPasscode] = useState("");
   const [expiresAt, setExpiresAt] = useState("");
   const [minify, setMinify] = useState(false);
+  const [domains, setDomains] = useState("");
+  const [blockOffline, setBlockOffline] = useState(false);
+  const [breakFrames, setBreakFrames] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const run = async () => {
@@ -330,6 +363,9 @@ function SiteModal({ onClose, toast }) {
       fd.append("passcode", passcode);
       if (expiresAt) fd.append("expires_at", expiresAt);
       fd.append("minify", String(minify));
+      fd.append("allowed_domains", domains);
+      fd.append("block_offline", String(blockOffline));
+      fd.append("break_frames", String(breakFrames));
       const { blob, filename } = await api.protectedContent.protectSite(fd);
       saveBlob(blob, filename);
       toast("Protected site downloaded");
@@ -354,7 +390,15 @@ function SiteModal({ onClose, toast }) {
           <input className="input" type="datetime-local" value={expiresAt} onChange={(e) => setExpiresAt(e.target.value)} />
         </Field>
       </div>
-      <label className="row" style={{ gap: 6 }}><Switch checked={minify} onChange={setMinify} /><span className="page-sub">Minify source</span></label>
+      <Field label="Domain lock (comma-separated, optional)">
+        <input className="input" value={domains} onChange={(e) => setDomains(e.target.value)}
+          placeholder="example.com — blank = runs anywhere" />
+      </Field>
+      <div className="row" style={{ gap: 18, flexWrap: "wrap" }}>
+        <label className="row" style={{ gap: 6 }}><Switch checked={minify} onChange={setMinify} /><span className="page-sub">Minify source</span></label>
+        <label className="row" style={{ gap: 6 }}><Switch checked={blockOffline} onChange={setBlockOffline} /><span className="page-sub">No offline use</span></label>
+        <label className="row" style={{ gap: 6 }}><Switch checked={breakFrames} onChange={setBreakFrames} /><span className="page-sub">Break frames</span></label>
+      </div>
       <p className="page-sub" style={{ marginTop: 8 }}>Files must be served over <b>https://</b> (or opened from disk) — plain http:// blocks the decryption.</p>
     </Modal>
   );
@@ -374,7 +418,7 @@ function BatchExportModal({ pages, onClose, toast }) {
 
   const run = async () => {
     const ids = [...selected];
-    if (!ids.length) { toast("Select at least one page", "err"); return; }
+    if (!ids.length) { toast("Select at least one document", "err"); return; }
     setBusy(true);
     try {
       const { blob, filename } = await api.protectedContent.exportBatch(ids, passcode, expiresAt);
@@ -391,7 +435,7 @@ function BatchExportModal({ pages, onClose, toast }) {
         <button className="btn" onClick={onClose}>Cancel</button>
         <button className="btn btn-primary" onClick={run} disabled={busy}>{busy ? "Building…" : `Download .zip (${selected.size})`}</button>
       </>}>
-      <p className="page-sub">Encrypts each selected page into its own standalone HTML file and downloads them as a .zip. One passcode protects every file in the batch.</p>
+      <p className="page-sub">Encrypts each selected page or file into its own standalone HTML file and downloads them as a .zip. One passcode protects every file in the batch.</p>
       <div className="field-row">
         <Field label="Passcode for all files (recommended)">
           <input className="input" type="text" value={passcode} onChange={(e) => setPasscode(e.target.value)} placeholder="viewers type this to unlock" />
@@ -483,12 +527,14 @@ function ExportModal({ doc, onClose, toast }) {
   };
 
   return (
-    <Modal title={`Export protected .html — ${doc.name}`} onClose={onClose}
+    <Modal title={`${doc.kind === "file" ? "Export encrypted file" : "Export protected .html"} — ${doc.name}`} onClose={onClose}
       footer={<>
         <button className="btn" onClick={onClose}>Cancel</button>
         <button className="btn btn-primary" onClick={download} disabled={busy}>{busy ? "Building…" : "Download .html"}</button>
       </>}>
-      <p className="page-sub">Downloads a self-contained HTML file you can host on any server. Its images are embedded and encrypted inside the file. The page is encrypted with AES-256; the viewer enters the passcode to unlock it, and the passcode is never stored in the file.</p>
+      <p className="page-sub">{doc.kind === "file"
+        ? "Downloads a self-decrypting .html wrapper around your file. The recipient opens it, types the passcode, and the browser decrypts in memory and saves the original file under its real name — nothing to install. The plaintext file never leaves this server."
+        : "Downloads a self-contained HTML file you can host on any server. Its images are embedded and encrypted inside the file. The page is encrypted with AES-256; the viewer enters the passcode to unlock it, and the passcode is never stored in the file."}</p>
       <div className="field-row">
         <Field label="Export passcode (recommended)">
           <input className="input" type="text" value={passcode} onChange={(e) => setPasscode(e.target.value)} placeholder="viewers type this to unlock" autoFocus />
@@ -500,7 +546,7 @@ function ExportModal({ doc, onClose, toast }) {
       <p className="page-sub" style={{ marginTop: 8 }}>
         {passcode
           ? "Strong: without this passcode the content cannot be read, even by someone who downloads the file."
-          : "⚠ No passcode: the file opens with no prompt and its source can be recovered — this is obfuscation only. Add a passcode for real protection."}
+          : "⚠ No passcode: the file opens with no prompt and the key is embedded in it, so the content can be recovered — this is obfuscation only. Add a passcode for real protection."}
       </p>
       <p className="page-sub" style={{ marginTop: 6 }}>Note: the file must be opened over <b>https://</b> (or from disk). On a plain http:// site the browser blocks the decryption and the page won't unlock.</p>
     </Modal>

@@ -21,7 +21,7 @@ from rest_framework.response import Response
 
 from apps.core.mixins import WorkspaceScopedMixin
 
-from .export import build_protected_html
+from .export import build_protected_export
 from .models import ProtectedAsset, ProtectedDocument
 from .scripts import protect_script
 from .site import process_site_zip
@@ -88,20 +88,20 @@ class ProtectedDocumentViewSet(WorkspaceScopedMixin, viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"])
     def export(self, request, pk=None):
-        """Build a standalone protected .html file to host anywhere.
+        """Build a standalone protected .html file to host or send anywhere.
 
-        The page is AES-256-GCM encrypted with a PBKDF2 key from the supplied
+        The payload is AES-256-GCM encrypted with a PBKDF2 key from the supplied
         passcode; the file embeds only ciphertext, never the passcode or key.
         An empty passcode produces a keyless (obfuscation-only) file.
+
+        Works for both kinds. A page renders itself after unlocking; a file
+        decrypts in the browser and is handed over under its original name, which
+        is the only way to ship an encrypted PDF/zip/docx the recipient can open
+        without installing anything.
         """
         doc = self.get_object()
-        if doc.kind != ProtectedDocument.KIND_PAGE:
-            return Response(
-                {"detail": "Only inline pages can be exported to a standalone HTML file."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
         passcode = (request.data.get("passcode") or "").strip()
-        html = build_protected_html(doc, passcode=passcode, expires_ms=_expires_ms(request.data.get("expires_at")))
+        html = build_protected_export(doc, passcode=passcode, expires_ms=_expires_ms(request.data.get("expires_at")))
         filename = f"{slugify(doc.name) or 'protected'}-protected.html"
         resp = HttpResponse(html, content_type="text/html; charset=utf-8")
         resp["Content-Disposition"] = f'attachment; filename="{filename}"'
@@ -109,17 +109,17 @@ class ProtectedDocumentViewSet(WorkspaceScopedMixin, viewsets.ModelViewSet):
 
     @action(detail=False, methods=["post"], url_path="export-batch")
     def export_batch(self, request):
-        """Export several pages at once as a .zip of protected .html files.
+        """Export several documents at once as a .zip of protected .html files.
 
-        One passcode applies to all files in the batch. Only inline pages in the
-        caller's workspace are included; file-type documents are skipped.
+        One passcode applies to every file in the batch. Pages and uploaded files
+        are both included; each becomes its own self-decrypting .html.
         """
         ids = request.data.get("ids") or []
         passcode = (request.data.get("passcode") or "").strip()
         expires_ms = _expires_ms(request.data.get("expires_at"))
-        pages = self.get_queryset().filter(id__in=ids, kind=ProtectedDocument.KIND_PAGE)
+        pages = self.get_queryset().filter(id__in=ids)
         if not pages.exists():
-            return Response({"detail": "No exportable pages selected."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"detail": "No exportable documents selected."}, status=status.HTTP_400_BAD_REQUEST)
 
         buf = io.BytesIO()
         used = {}
@@ -129,7 +129,7 @@ class ProtectedDocumentViewSet(WorkspaceScopedMixin, viewsets.ModelViewSet):
                 # Guard against duplicate names colliding inside the zip.
                 used[base] = used.get(base, 0) + 1
                 name = base if used[base] == 1 else f"{base}-{used[base]}"
-                zf.writestr(f"{name}-protected.html", build_protected_html(doc, passcode=passcode, expires_ms=expires_ms))
+                zf.writestr(f"{name}-protected.html", build_protected_export(doc, passcode=passcode, expires_ms=expires_ms))
 
         resp = HttpResponse(buf.getvalue(), content_type="application/zip")
         resp["Content-Disposition"] = 'attachment; filename="protected-pages.zip"'
@@ -158,6 +158,9 @@ class ProtectedDocumentViewSet(WorkspaceScopedMixin, viewsets.ModelViewSet):
                 disable_right_click=flag("disable_right_click"),
                 disable_copy=flag("disable_copy"),
                 disable_print=flag("disable_print"),
+                allowed_domains=request.data.get("allowed_domains") or "",
+                block_offline=flag("block_offline"),
+                break_frames=flag("break_frames"),
             )
         except ValueError as e:
             return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)

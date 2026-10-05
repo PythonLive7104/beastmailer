@@ -14,7 +14,7 @@ import posixpath
 import re
 import zipfile
 
-from .export import deterrents_js, encrypt_html_document
+from .export import deterrents_js, encrypt_html_document, parse_domains
 from .htmlmin import minify_html
 
 _HTML_EXT = (".html", ".htm")
@@ -84,7 +84,9 @@ def _inline_site_assets(html: str, base_dir: str, files: dict) -> str:
 
 def process_site_zip(zip_bytes: bytes, passcode: str = "", expires_ms: int = 0,
                      minify: bool = False, disable_right_click: bool = False,
-                     disable_copy: bool = False, disable_print: bool = False) -> bytes:
+                     disable_copy: bool = False, disable_print: bool = False,
+                     allowed_domains: str = "", block_offline: bool = False,
+                     break_frames: bool = False) -> bytes:
     """Return a .zip of protected HTML files built from an uploaded site .zip."""
     try:
         zin = zipfile.ZipFile(io.BytesIO(zip_bytes))
@@ -102,6 +104,7 @@ def process_site_zip(zip_bytes: bytes, passcode: str = "", expires_ms: int = 0,
         raise ValueError("The archive contains no .html files to protect.")
 
     det = deterrents_js(disable_right_click, disable_copy, disable_print)
+    domains = parse_domains(allowed_domains)
     out = io.BytesIO()
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zout:
         for path in html_paths:
@@ -114,6 +117,7 @@ def process_site_zip(zip_bytes: bytes, passcode: str = "", expires_ms: int = 0,
             protected = encrypt_html_document(
                 html.encode("utf-8"), title, passcode=passcode,
                 expires_ms=expires_ms, deterrents=det,
+                domains=domains, block_offline=block_offline, break_frames=break_frames,
             )
             zout.writestr(path, protected)  # same relative path keeps inter-page links valid
     return out.getvalue()

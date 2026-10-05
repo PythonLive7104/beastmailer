@@ -27,6 +27,7 @@ class ProtectedDocumentSerializer(serializers.ModelSerializer):
             "upload", "html", "passcode", "clear_passcode",
             "content_type", "original_filename", "size", "requires_passcode",
             "expires_at", "max_views", "view_count", "allowed_referrers", "is_active",
+            "allowed_domains", "block_offline", "break_frames",
             "disable_right_click", "disable_copy", "disable_print",
             "block_shortcuts", "minify", "wrong_passcode_action",
             "public_path", "created_at", "updated_at",

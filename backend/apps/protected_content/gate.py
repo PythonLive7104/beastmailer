@@ -6,6 +6,7 @@ checks run in a fixed order and each failure is logged with its own outcome.
 """
 from django.utils import timezone
 
+from .export import parse_domains
 from .models import ProtectedAccessLog, ProtectedDocument
 
 
@@ -23,6 +24,22 @@ def _referrer_ok(doc: ProtectedDocument, referrer: str) -> bool:
         return True
     ref = (referrer or "").lower()
     return any(a in ref for a in allowed)
+
+
+def _domain_ok(doc: ProtectedDocument, request) -> bool:
+    """Domain lock: the host this link was opened on must be one we licensed.
+
+    Unlike the referrer check (which inspects where the visitor came *from*), this
+    pins the host serving the link, so a copy of the deployment under another
+    domain stops working. Subdomains of a listed domain pass.
+    """
+    allowed = parse_domains(doc.allowed_domains)
+    if not allowed:
+        return True
+    host = (request.get_host() or "").split(":")[0].lower()
+    if host.startswith("www."):
+        host = host[4:]
+    return any(host == d or host.endswith("." + d) for d in allowed)
 
 
 def log(doc: ProtectedDocument, request, outcome: str):
@@ -56,6 +73,10 @@ def check_access(doc: ProtectedDocument, request, passcode: str | None = None):
         log(doc, request, ProtectedAccessLog.OUTCOME_DENIED_REFERRER)
         return False, ProtectedAccessLog.OUTCOME_DENIED_REFERRER
 
+    if not _domain_ok(doc, request):
+        log(doc, request, ProtectedAccessLog.OUTCOME_DENIED_DOMAIN)
+        return False, ProtectedAccessLog.OUTCOME_DENIED_DOMAIN
+
     if doc.requires_passcode and not doc.check_passcode(passcode or ""):
         # Only log an explicit denial when a passcode was actually attempted,
         # so merely opening the page (and seeing the prompt) isn't noise.
@@ -84,4 +105,7 @@ def check_asset_access(doc: ProtectedDocument, request):
     if not _referrer_ok(doc, request.META.get("HTTP_REFERER", "")):
         log(doc, request, ProtectedAccessLog.OUTCOME_DENIED_REFERRER)
         return False, ProtectedAccessLog.OUTCOME_DENIED_REFERRER
+    if not _domain_ok(doc, request):
+        log(doc, request, ProtectedAccessLog.OUTCOME_DENIED_DOMAIN)
+        return False, ProtectedAccessLog.OUTCOME_DENIED_DOMAIN
     return True, ProtectedAccessLog.OUTCOME_GRANTED
