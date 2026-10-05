@@ -39,6 +39,18 @@ class ProtectedDocument(models.Model):
     allowed_referrers = models.CharField(
         max_length=500, blank=True, default="", help_text="Comma-separated; blank = no check"
     )
+    # Domain lock. Enforced server-side for hosted links (the Host header) and
+    # embedded in exported files, so a leaked export only runs where you licensed
+    # it. Subdomains of a listed domain are allowed.
+    allowed_domains = models.CharField(
+        max_length=500, blank=True, default="",
+        help_text="Comma-separated hostnames the content may run on; blank = anywhere",
+    )
+    # Refuse to run from a local copy (file:// or no host) — Protware's
+    # "don't allow offline use". Applies to exported files.
+    block_offline = models.BooleanField(default=False)
+    # Break out of frames; also sent as X-Frame-Options/CSP on hosted links.
+    break_frames = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
 
     # --- Cosmetic browser deterrents (weak; labelled as such in the UI) ---
@@ -131,6 +143,7 @@ class ProtectedAccessLog(models.Model):
     OUTCOME_EXPIRED = "expired"
     OUTCOME_OVER_LIMIT = "over_limit"
     OUTCOME_DENIED_REFERRER = "denied_referrer"
+    OUTCOME_DENIED_DOMAIN = "denied_domain"
     OUTCOME_INACTIVE = "inactive"
     OUTCOME_CHOICES = [
         (OUTCOME_GRANTED, "Granted"),
@@ -138,6 +151,7 @@ class ProtectedAccessLog(models.Model):
         (OUTCOME_EXPIRED, "Expired"),
         (OUTCOME_OVER_LIMIT, "Over view limit"),
         (OUTCOME_DENIED_REFERRER, "Denied — referrer"),
+        (OUTCOME_DENIED_DOMAIN, "Denied — domain"),
         (OUTCOME_INACTIVE, "Inactive"),
     ]
 
