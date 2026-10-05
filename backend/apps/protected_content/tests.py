@@ -19,7 +19,7 @@ from django.utils import timezone
 
 from apps.workspaces.models import Workspace
 
-from .export import build_protected_export, parse_domains
+from .export import build_protected_export, is_html_payload, parse_domains
 from .gate import check_access
 from .models import ProtectedAccessLog, ProtectedDocument
 
@@ -341,3 +341,82 @@ class ExportApiTests(TestCase):
             self.assertEqual(len(names), 2, names)
             for name in names:
                 self.assertNotIn(CANARY, zf.read(name))
+
+
+class HtmlFileRendersTests(TestCase):
+    """An uploaded .html file must render like the original page, not download.
+
+    Someone protecting their own site uploads .html files and expects the
+    protected copy to behave like the page it replaces. Handing them a download
+    was the wrong deliverable and is the regression these tests pin down.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.ws = Workspace.objects.create(name="W")
+
+    PAGE = b"<!doctype html><h1>Heading</h1><script>var x=1;</script>"
+
+    def _html_file(self, content_type, filename, slug):
+        doc = ProtectedDocument(
+            workspace=self.ws, kind=ProtectedDocument.KIND_FILE, name="My Site",
+            slug=slug, content_type=content_type, original_filename=filename,
+        )
+        doc.set_payload(self.PAGE)
+        doc.save()
+        return doc
+
+    def test_detects_html_by_type_or_extension(self):
+        self.assertTrue(is_html_payload("text/html", "x.bin"))
+        self.assertTrue(is_html_payload("application/octet-stream", "index.html"))
+        self.assertTrue(is_html_payload("", "page.HTM"))
+        self.assertFalse(is_html_payload("application/pdf", "report.pdf"))
+        self.assertFalse(is_html_payload("", "archive.zip"))
+
+    def test_uploaded_html_exports_as_a_rendering_page(self):
+        doc = self._html_file("text/html", "index.html", "htmlfile")
+        cfg = extract_config(build_protected_export(doc, passcode="pw"))
+        # "page" is what makes the wrapper render instead of save to disk.
+        self.assertEqual(cfg["kind"], "page")
+        self.assertEqual(browser_decrypt(cfg, "pw"), self.PAGE)
+
+    def test_uploaded_html_without_a_content_type_still_renders(self):
+        doc = self._html_file("application/octet-stream", "index.html", "htmlfile2")
+        self.assertEqual(extract_config(build_protected_export(doc, passcode="pw"))["kind"], "page")
+
+    def test_a_real_document_still_downloads(self):
+        doc = ProtectedDocument(
+            workspace=self.ws, kind=ProtectedDocument.KIND_FILE, name="Report",
+            slug="pdffile", content_type="application/pdf", original_filename="r.pdf",
+        )
+        doc.set_payload(CANARY)
+        doc.save()
+        cfg = extract_config(build_protected_export(doc, passcode="pw"))
+        self.assertEqual(cfg["kind"], "file")
+        self.assertEqual(cfg["fname"], "r.pdf")
+
+
+class ExportedScriptTests(TestCase):
+    """Guards inside the generated file that a browser test would otherwise own."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.ws = Workspace.objects.create(name="W")
+
+    def _export(self, passcode):
+        doc = ProtectedDocument(
+            workspace=self.ws, kind=ProtectedDocument.KIND_PAGE, name="P", slug="scriptdoc",
+        )
+        doc.set_payload(b"<p>hi</p>")
+        doc.save()
+        return build_protected_export(doc, passcode=passcode)
+
+    def test_insecure_context_is_reported_as_such_not_as_a_bad_passcode(self):
+        """A plain http:// page used to say "Incorrect passcode" for a correct one."""
+        html = self._export("pw")
+        self.assertIn("!window.crypto || !crypto.subtle", html)
+        self.assertIn("blocked the", html)
+
+    def test_keyless_export_never_shows_a_passcode_box(self):
+        html = self._export("")
+        self.assertIn("$('f').style.display = 'none'", html)

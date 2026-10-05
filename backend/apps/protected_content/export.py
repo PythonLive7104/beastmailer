@@ -235,15 +235,35 @@ def build_protected_html(doc, passcode: str = "", expires_ms: int = 0, inline_as
     )
 
 
+def is_html_payload(content_type: str, filename: str) -> bool:
+    """Whether an uploaded file is a web page rather than a document to save."""
+    if "html" in (content_type or "").lower():
+        return True
+    return os.path.splitext((filename or "").lower())[1] in (".html", ".htm", ".xhtml")
+
+
 def build_protected_file_html(doc, passcode: str = "", expires_ms: int = 0) -> str:
     """Return a self-decrypting .html wrapper around `doc`'s file payload.
 
     This closes the obvious hole: a file document used to be encrypted at rest but
     handed over in plaintext, and could not be exported at all. Now the portable
     deliverable is encrypted end to end exactly as a page is.
+
+    An uploaded **HTML** file is rendered, not downloaded. Someone protecting their
+    own site uploads .html files and expects the protected copy to behave like the
+    original page; handing them a download instead was the wrong deliverable. The
+    payload goes through the same renderer as an inline page, so its CSS, scripts,
+    images and event handlers all work.
     """
+    payload = doc.get_payload()
+    filename = export_filename(doc)
+    if is_html_payload(doc.content_type, filename):
+        return encrypt_html_document(
+            payload, doc.name, passcode=passcode, expires_ms=expires_ms,
+            deterrents=_deterrent_js(doc), **_doc_restrictions(doc),
+        )
     return encrypt_file_document(
-        doc.get_payload(), doc.name, export_filename(doc),
+        payload, doc.name, filename,
         (doc.content_type or "application/octet-stream"),
         passcode=passcode, expires_ms=expires_ms, deterrents=_deterrent_js(doc),
         **_doc_restrictions(doc),
@@ -295,6 +315,13 @@ function fail(msg){
 // Usage restrictions. See the module docstring: these are licensing controls,
 // not the cryptography — a passcode is what keeps the payload unreadable.
 function guard(){
+  // Web Crypto only exists in a secure context: https, file:// or localhost. On a
+  // plain http:// address crypto.subtle is undefined, decryption throws, and the
+  // visitor used to be told "Incorrect passcode" for a passcode that was correct.
+  if (!window.crypto || !crypto.subtle)
+    return 'This page was opened over plain http://, so the browser blocked the ' +
+           'decryption it needs. Open the file directly from disk, or serve it over ' +
+           'https:// (http://localhost works too).';
   if (CFG.frames) {
     try {
       if (window.top !== window.self) { window.top.location = window.self.location; return null; }
@@ -341,12 +368,17 @@ function applyDeterrents(){
   document.title = CFG.title || 'Protected';
   const blocked = guard();
   if (blocked) { fail(blocked); return; }
-  prime();
-  if (CFG.keyless) {                       // no passcode required
+  if (CFG.keyless) {
+    // No passcode was set, so never show a passcode box — not even for the
+    // moment it takes to decrypt. The visitor should just see their content.
+    $('hd').textContent = 'Opening…';
+    $('sub').textContent = '';
+    $('f').style.display = 'none';
     try { await reveal(await unlock('')); }
-    catch (e) { $('err').textContent = 'Could not load content.'; }
+    catch (e) { fail('Could not load this content.'); }
     return;
   }
+  prime();
   $('f').addEventListener('submit', async (ev) => {
     ev.preventDefault();
     $('err').textContent = '';
@@ -366,11 +398,20 @@ async function reveal(bytes){
 }
 """
 
-# Files hand the decrypted bytes over as a download under the original name.
+# Files are shown where the browser can show them, and saved otherwise.
 _FILE_BODY = r"""
+function viewable(){
+  const m = (CFG.mime || '').toLowerCase();
+  if (m.startsWith('image/')) return 'image';
+  if (m === 'application/pdf') return 'pdf';
+  if (m.startsWith('text/') || m === 'application/json') return 'text';
+  return '';
+}
 function prime(){
   $('hd').textContent = 'Protected file';
-  $('sub').innerHTML = 'Enter the passcode to download <span class="meta">' + clean(CFG.fname) + '</span>.';
+  const verb = viewable() ? 'view' : 'download';
+  $('sub').innerHTML = 'Enter the passcode to ' + verb + ' <span class="meta">' +
+    clean(CFG.fname) + '</span>.';
 }
 function human(n){
   const u = ['B','KB','MB','GB'];
@@ -386,12 +427,39 @@ async function reveal(bytes){
     a.href = url; a.download = CFG.fname || 'download';
     document.body.appendChild(a); a.click(); a.remove();
   };
+  const kind = viewable();
+  if (kind) {
+    // Show it in the page rather than dropping it on the visitor's disk; the
+    // Save button is there for when they do want to keep a copy.
+    document.body.innerHTML =
+      '<div style="padding:12px 16px;display:flex;gap:12px;align-items:center;' +
+      'background:#171a21;border-bottom:1px solid #262b36">' +
+      '<span class="meta" style="flex:1">' + clean(CFG.fname) + ' · ' + human(bytes.length) + '</span>' +
+      '<button id="dl" style="margin:0;width:auto;padding:8px 14px">Save a copy</button></div>' +
+      '<div id="view"></div>';
+    const view = $('view');
+    if (kind === 'image') {
+      view.innerHTML = '<img style="max-width:100%;display:block;margin:0 auto">';
+      view.firstChild.src = url;
+    } else if (kind === 'pdf') {
+      view.innerHTML = '<embed type="application/pdf" style="width:100%;height:calc(100vh - 53px)">';
+      view.firstChild.src = url;
+    } else {
+      const pre = document.createElement('pre');
+      pre.style.cssText = 'padding:16px;white-space:pre-wrap;word-break:break-word';
+      pre.textContent = new TextDecoder().decode(bytes);
+      view.appendChild(pre);
+    }
+    $('dl').addEventListener('click', save);
+    applyDeterrents();
+    return;
+  }
   document.querySelector('.card').innerHTML =
     '<h1>Unlocked</h1><p><span class="meta">' + clean(CFG.fname) + '</span><br>' +
     human(bytes.length) + '</p><button id="dl">Download again</button>';
   $('dl').addEventListener('click', save);
   applyDeterrents();
-  save();   // the visitor asked for the file; don't make them click twice
+  save();   // nothing to show it with, so hand the file over
 }
 """
 

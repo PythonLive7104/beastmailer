@@ -225,7 +225,8 @@ export default function Protected() {
                 Stored encrypted. The <b>hosted link</b> decrypts and hands over the real file once your
                 rules pass — that is what a gate is for, so the download itself is the original.
                 To send a file that stays encrypted in transit and at rest, use <b>Export</b>: the
-                recipient gets a self-decrypting .html and needs the passcode to get the file out.
+                recipient gets a self-decrypting .html. Upload an <b>.html</b> file and the export
+                renders it as the original page — scripts, styles and images all work.
               </p>
             </>
           )}
@@ -399,7 +400,10 @@ function SiteModal({ onClose, toast }) {
         <label className="row" style={{ gap: 6 }}><Switch checked={blockOffline} onChange={setBlockOffline} /><span className="page-sub">No offline use</span></label>
         <label className="row" style={{ gap: 6 }}><Switch checked={breakFrames} onChange={setBreakFrames} /><span className="page-sub">Break frames</span></label>
       </div>
-      <p className="page-sub" style={{ marginTop: 8 }}>Files must be served over <b>https://</b> (or opened from disk) — plain http:// blocks the decryption.</p>
+      <p className="page-sub" style={{ marginTop: 8 }}>
+        <b>Works offline</b> — open any page from the .zip straight off disk to check it before
+        you host. Once hosted it must be <b>https://</b>; browsers block decryption on plain http://.
+      </p>
     </Modal>
   );
 }
@@ -533,7 +537,7 @@ function ExportModal({ doc, onClose, toast }) {
         <button className="btn btn-primary" onClick={download} disabled={busy}>{busy ? "Building…" : "Download .html"}</button>
       </>}>
       <p className="page-sub">{doc.kind === "file"
-        ? "Downloads a self-decrypting .html wrapper around your file. The recipient opens it, types the passcode, and the browser decrypts in memory and saves the original file under its real name — nothing to install. The plaintext file never leaves this server."
+        ? "Downloads a self-decrypting .html wrapper around your file. The recipient opens it and types the passcode; an HTML file renders as the original page, a PDF, image or text file is shown in the page, and anything else is saved under its real name. Nothing to install, and the plaintext never leaves this server."
         : "Downloads a self-contained HTML file you can host on any server. Its images are embedded and encrypted inside the file. The page is encrypted with AES-256; the viewer enters the passcode to unlock it, and the passcode is never stored in the file."}</p>
       <div className="field-row">
         <Field label="Export passcode (recommended)">
@@ -548,7 +552,12 @@ function ExportModal({ doc, onClose, toast }) {
           ? "Strong: without this passcode the content cannot be read, even by someone who downloads the file."
           : "⚠ No passcode: the file opens with no prompt and the key is embedded in it, so the content can be recovered — this is obfuscation only. Add a passcode for real protection."}
       </p>
-      <p className="page-sub" style={{ marginTop: 6 }}>Note: the file must be opened over <b>https://</b> (or from disk). On a plain http:// site the browser blocks the decryption and the page won't unlock.</p>
+      <p className="page-sub" style={{ marginTop: 6 }}>
+        <b>Works offline.</b> Double-click the downloaded file and it opens in your browser —
+        no server, no internet. A local preview server (VS Code Live Preview, Live Server) works too.
+        The one place it can&apos;t run is a plain <b>http://</b> site: browsers block decryption there,
+        so host over <b>https://</b>.
+      </p>
     </Modal>
   );
 }
