@@ -420,3 +420,84 @@ class ExportedScriptTests(TestCase):
     def test_keyless_export_never_shows_a_passcode_box(self):
         html = self._export("")
         self.assertIn("$('f').style.display = 'none'", html)
+
+
+class SiteZipAssetTests(TestCase):
+    """Every local asset a page uses must end up inside the ciphertext.
+
+    Anything left as a loose file is both unprotected and missing once only the
+    protected HTML is shipped. CSS url() was the gap: background images and
+    @font-face sources are referenced from stylesheet text, which the attribute
+    pass never sees.
+    """
+
+    PNG = bytes([0x89]) + b"PNG" + bytes([13, 10, 26, 10]) + b"fake-image-bytes" * 4
+
+    def _zip(self, files):
+        import io as _io
+        import zipfile
+
+        buf = _io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as z:
+            for name, data in files.items():
+                z.writestr(name, data)
+        return buf.getvalue()
+
+    def _protect(self, files, **kw):
+        import io as _io
+        import zipfile
+
+        from .site import process_site_zip
+
+        out = process_site_zip(self._zip(files), passcode="pw", **kw)
+        return zipfile.ZipFile(_io.BytesIO(out))
+
+    def test_css_background_image_is_embedded(self):
+        page = b"""<!doctype html><html><head><style>
+            .hero{background-image:url('img/bg.png')}
+            </style></head><body><p>hi</p></body></html>"""
+        zf = self._protect({"index.html": page, "img/bg.png": self.PNG})
+        html = zf.read("index.html").decode()
+        cfg = extract_config(html)
+        body = browser_decrypt(cfg, "pw").decode()
+        self.assertIn("data:image/png;base64,", body)
+        self.assertNotIn("img/bg.png", body)
+
+    def test_url_in_a_linked_stylesheet_resolves_against_that_stylesheet(self):
+        """css/site.css referencing ../img/bg.png must resolve from css/, not from /."""
+        page = b'<!doctype html><html><head><link rel="stylesheet" href="css/site.css">'                b"</head><body><p>hi</p></body></html>"
+        css = b".hero{background:url('../img/bg.png')}"
+        zf = self._protect({"index.html": page, "css/site.css": css, "img/bg.png": self.PNG})
+        body = browser_decrypt(extract_config(zf.read("index.html").decode()), "pw").decode()
+        self.assertIn("data:image/png;base64,", body)
+        self.assertNotIn("../img/bg.png", body)
+
+    def test_img_tags_are_still_embedded(self):
+        page = b'<!doctype html><html><body><img src="photo.png"></body></html>'
+        zf = self._protect({"index.html": page, "photo.png": self.PNG})
+        body = browser_decrypt(extract_config(zf.read("index.html").decode()), "pw").decode()
+        self.assertIn("data:image/png;base64,", body)
+        self.assertNotIn('src="photo.png"', body)
+
+    def test_remote_and_data_urls_are_left_alone(self):
+        page = b"""<!doctype html><html><head><style>
+            .a{background:url('https://cdn.example.com/x.png')}
+            .b{background:url('data:image/gif;base64,AAAA')}
+            </style></head><body><p>hi</p></body></html>"""
+        zf = self._protect({"index.html": page})
+        body = browser_decrypt(extract_config(zf.read("index.html").decode()), "pw").decode()
+        self.assertIn("https://cdn.example.com/x.png", body)
+        self.assertIn("data:image/gif;base64,AAAA", body)
+
+    def test_a_missing_asset_does_not_break_the_build(self):
+        page = b"""<!doctype html><html><head><style>
+            .a{background:url('nope.png')}</style></head><body><p>hi</p></body></html>"""
+        zf = self._protect({"index.html": page})
+        body = browser_decrypt(extract_config(zf.read("index.html").decode()), "pw").decode()
+        self.assertIn("nope.png", body)   # left as-is rather than mangled
+
+    def test_nothing_of_the_page_is_readable_in_the_protected_file(self):
+        page = b'<!doctype html><html><body><h1>SECRET-HEADING</h1></body></html>'
+        zf = self._protect({"index.html": page, "photo.png": self.PNG})
+        html = zf.read("index.html").decode()
+        self.assertNotIn("SECRET-HEADING", html)
