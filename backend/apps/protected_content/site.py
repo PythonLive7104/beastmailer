@@ -28,6 +28,11 @@ _SCRIPT_SRC = re.compile(
     r"""<script\b[^>]*\bsrc\s*=\s*(["'])(.*?)\1[^>]*>\s*</script>""",
     re.IGNORECASE,
 )
+# url(...) inside CSS — background images and @font-face files, which the
+# attribute pass above never sees because they live in stylesheet text.
+_CSS_URL = re.compile(r"""url\(\s*(['"]?)(?!['"]?(?:data:|https?:|//))(.*?)\1\s*\)""", re.IGNORECASE)
+# Existing inline <style> blocks in the page itself.
+_STYLE_BLOCK = re.compile(r"""(<style\b[^>]*>)(.*?)(</style>)""", re.IGNORECASE | re.DOTALL)
 
 
 def _is_local(ref: str) -> bool:
@@ -45,15 +50,47 @@ def _resolve(base_dir: str, ref: str) -> str:
     return posixpath.normpath(posixpath.join(base_dir, ref)).lstrip("/")
 
 
+def _data_uri(path: str, data: bytes) -> str:
+    ctype = mimetypes.guess_type(path)[0] or "application/octet-stream"
+    return f"data:{ctype};base64,{base64.b64encode(data).decode()}"
+
+
+def _inline_css_urls(css: str, base_dir: str, files: dict) -> str:
+    """Embed url(...) targets inside stylesheet text.
+
+    Background images and @font-face sources are referenced from CSS, not from an
+    attribute, so without this pass they stayed as loose files next to the
+    protected page — unencrypted, and missing entirely once only the protected
+    HTML is shipped. `base_dir` is the directory of the stylesheet the rules came
+    from, since a url() resolves relative to its own file, not to the page.
+    """
+    def sub(m):
+        quote, ref = m.group(1), m.group(2)
+        if not _is_local(ref):
+            return m.group(0)
+        data = files.get(_resolve(base_dir, ref))
+        if data is None:
+            return m.group(0)
+        return f"url({quote}{_data_uri(ref, data)}{quote})"
+
+    return _CSS_URL.sub(sub, css)
+
+
 def _inline_site_assets(html: str, base_dir: str, files: dict) -> str:
     """Inline CSS, JS and image references that exist in the zip."""
+    # Stylesheets written directly in the page resolve against the page's folder.
+    html = _STYLE_BLOCK.sub(
+        lambda m: m.group(1) + _inline_css_urls(m.group(2), base_dir, files) + m.group(3), html
+    )
     # Stylesheets -> <style>…</style>
     def css_sub(m):
         path = _resolve(base_dir, m.group(2))
         data = files.get(path)
         if data is None:
             return m.group(0)
-        return f"<style>{data.decode('utf-8', 'replace')}</style>"
+        # A url() in here is relative to the stylesheet's own folder, not the page's.
+        css = _inline_css_urls(data.decode("utf-8", "replace"), posixpath.dirname(path), files)
+        return f"<style>{css}</style>"
     html = _LINK_CSS.sub(css_sub, html)
 
     # External scripts -> inline <script>
@@ -76,9 +113,7 @@ def _inline_site_assets(html: str, base_dir: str, files: dict) -> str:
         data = files.get(path)
         if data is None:
             return m.group(0)
-        ctype = mimetypes.guess_type(path)[0] or "application/octet-stream"
-        uri = f"data:{ctype};base64,{base64.b64encode(data).decode()}"
-        return f'{attr}={quote}{uri}{quote}'
+        return f'{attr}={quote}{_data_uri(path, data)}{quote}'
     return _ATTR.sub(attr_sub, html)
 
 
