@@ -309,8 +309,20 @@ const CFG = /*__CONFIG__*/;
 const dec = (b64) => Uint8Array.from(atob(b64), c => c.charCodeAt(0));
 const $ = (id) => document.getElementById(id);
 const clean = (s) => String(s || '').replace(/[<>&"]/g, '');
+function human(n){
+  const u = ['B','KB','MB','GB'];
+  let i = 0;
+  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return (i ? n.toFixed(1) : n) + ' ' + u[i];
+}
 function fail(msg){
-  document.querySelector('.card').innerHTML = '<h1>Unavailable</h1><p>' + clean(msg) + '</p>';
+  // The card is gone once a page has been written in, so fall back to the body:
+  // an error must always be visible, never swallowed into a blank screen.
+  const html = '<h1>Unavailable</h1><p>' + clean(msg) + '</p>';
+  const card = document.querySelector('.card');
+  if (card) { card.innerHTML = html; return; }
+  try { document.body.innerHTML = '<div id="gate"><div class="card">' + html + '</div></div>'; }
+  catch (e) { /* nothing left to render into */ }
 }
 // Usage restrictions. See the module docstring: these are licensing controls,
 // not the cryptography — a passcode is what keeps the payload unreadable.
@@ -372,10 +384,17 @@ function applyDeterrents(){
     // No passcode was set, so never show a passcode box — not even for the
     // moment it takes to decrypt. The visitor should just see their content.
     $('hd').textContent = 'Opening…';
-    $('sub').textContent = '';
+    $('sub').textContent = 'Decrypting ' + human(CFG.ct.length * 0.75) + '…';
     $('f').style.display = 'none';
+    // A silent spinner is indistinguishable from a hang, so say something if
+    // this takes unreasonably long rather than sitting on "Opening…" forever.
+    const slow = setTimeout(() => {
+      const s = $('sub');
+      if (s) s.textContent = 'Still working — large files can take a few seconds.';
+    }, 5000);
     try { await reveal(await unlock('')); }
-    catch (e) { fail('Could not load this content.'); }
+    catch (e) { fail('Could not open this content. ' + (e && e.message ? e.message : e)); }
+    finally { clearTimeout(slow); }
     return;
   }
   prime();
@@ -412,12 +431,6 @@ function prime(){
   const verb = viewable() ? 'view' : 'download';
   $('sub').innerHTML = 'Enter the passcode to ' + verb + ' <span class="meta">' +
     clean(CFG.fname) + '</span>.';
-}
-function human(n){
-  const u = ['B','KB','MB','GB'];
-  let i = 0;
-  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
-  return (i ? n.toFixed(1) : n) + ' ' + u[i];
 }
 async function reveal(bytes){
   const blob = new Blob([bytes], {type: CFG.mime || 'application/octet-stream'});
