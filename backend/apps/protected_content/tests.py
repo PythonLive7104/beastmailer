@@ -417,9 +417,20 @@ class ExportedScriptTests(TestCase):
         self.assertIn("!window.crypto || !crypto.subtle", html)
         self.assertIn("blocked the", html)
 
-    def test_keyless_export_never_shows_a_passcode_box(self):
+    def test_the_gate_is_hidden_until_something_needs_it(self):
+        """A keyless file must go straight to its content - no card, no flash.
+
+        The gate is hidden in CSS rather than hidden by script, so it cannot
+        paint before the script runs. Only the passcode prompt and errors
+        reveal it.
+        """
         html = self._export("")
-        self.assertIn("$('f').style.display = 'none'", html)
+        self.assertIn("#gate{display:none", html)
+        self.assertIn("function showGate()", html)
+
+    def test_errors_are_shown_even_after_the_card_is_gone(self):
+        html = self._export("")
+        self.assertIn('<div id="gate" style="display:flex">', html)
 
 
 class SiteZipAssetTests(TestCase):

@@ -291,7 +291,10 @@ _SHELL = r"""<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Protected</title><style>
 body{margin:0;font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#0f1115;color:#e6e8eb}
-#gate{display:flex;min-height:100vh;align-items:center;justify-content:center}
+/* Hidden until something actually needs asking or reporting. A file with no
+   passcode must go straight to its content, with no card flashing up first —
+   so the gate is opt-in, not opt-out, and cannot paint before the script runs. */
+#gate{display:none;min-height:100vh;align-items:center;justify-content:center}
 .card{background:#171a21;border:1px solid #262b36;border-radius:12px;padding:32px;max-width:380px;width:90%}
 h1{font-size:18px;margin:0 0 12px}p{color:#9aa4b2;margin:0 0 20px}
 input{width:100%;box-sizing:border-box;padding:11px 12px;border-radius:8px;border:1px solid #30374a;background:#0f1115;color:#e6e8eb;font-size:15px}
@@ -309,8 +312,28 @@ const CFG = /*__CONFIG__*/;
 const dec = (b64) => Uint8Array.from(atob(b64), c => c.charCodeAt(0));
 const $ = (id) => document.getElementById(id);
 const clean = (s) => String(s || '').replace(/[<>&"]/g, '');
+function human(n){
+  const u = ['B','KB','MB','GB'];
+  let i = 0;
+  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return (i ? n.toFixed(1) : n) + ' ' + u[i];
+}
+function showGate(){
+  const g = $('gate');
+  if (g) g.style.display = 'flex';
+}
 function fail(msg){
-  document.querySelector('.card').innerHTML = '<h1>Unavailable</h1><p>' + clean(msg) + '</p>';
+  showGate();
+  // The card is gone once a page has been written in, so fall back to the body:
+  // an error must always be visible, never swallowed into a blank screen.
+  const html = '<h1>Unavailable</h1><p>' + clean(msg) + '</p>';
+  const card = document.querySelector('.card');
+  if (card) { card.innerHTML = html; return; }
+  try {
+    document.body.innerHTML =
+      '<div id="gate" style="display:flex"><div class="card">' + html + '</div></div>';
+  }
+  catch (e) { /* nothing left to render into */ }
 }
 // Usage restrictions. See the module docstring: these are licensing controls,
 // not the cryptography — a passcode is what keeps the payload unreadable.
@@ -371,14 +394,22 @@ function applyDeterrents(){
   if (CFG.keyless) {
     // No passcode was set, so never show a passcode box — not even for the
     // moment it takes to decrypt. The visitor should just see their content.
-    $('hd').textContent = 'Opening…';
-    $('sub').textContent = '';
-    $('f').style.display = 'none';
+    // Nothing is rendered while this runs: the visitor sees their page appear,
+    // not a loading card. The watchdog only ever fires if something is wrong —
+    // an 8 MB file decrypts in under three seconds.
+    const slow = setTimeout(() => {
+      $('hd').textContent = 'Opening…';
+      $('sub').textContent = 'Decrypting ' + human(CFG.ct.length * 0.75) + '…';
+      $('f').style.display = 'none';
+      showGate();
+    }, 10000);
     try { await reveal(await unlock('')); }
-    catch (e) { fail('Could not load this content.'); }
+    catch (e) { fail('Could not open this content. ' + (e && e.message ? e.message : e)); }
+    finally { clearTimeout(slow); }
     return;
   }
   prime();
+  showGate();
   $('f').addEventListener('submit', async (ev) => {
     ev.preventDefault();
     $('err').textContent = '';
@@ -412,12 +443,6 @@ function prime(){
   const verb = viewable() ? 'view' : 'download';
   $('sub').innerHTML = 'Enter the passcode to ' + verb + ' <span class="meta">' +
     clean(CFG.fname) + '</span>.';
-}
-function human(n){
-  const u = ['B','KB','MB','GB'];
-  let i = 0;
-  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
-  return (i ? n.toFixed(1) : n) + ' ' + u[i];
 }
 async function reveal(bytes){
   const blob = new Blob([bytes], {type: CFG.mime || 'application/octet-stream'});
